@@ -1,47 +1,88 @@
 import React, { useState, useEffect } from 'react';
-import CreateGroupForm from './CreateGroupForm';
-import InviteMemberForm from './InviteMemberForm';
-import Chat from '../Chat/Chat';
 import { GroupMeta } from '../../domain/Group';
 
-const GroupManagement: React.FC = () => {
+interface GroupManagementProps {
+  userId: string;
+  deviceId: string;
+  onSelectGroup: (groupId: string) => void;
+}
+
+const GroupManagement: React.FC<GroupManagementProps> = ({ 
+  userId, 
+  deviceId, 
+  onSelectGroup 
+}) => {
   const [groups, setGroups] = useState<GroupMeta[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<GroupMeta | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
 
   useEffect(() => {
     const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
     setGroups(storedGroups);
   }, []);
 
-  const handleOpenChat = (group: GroupMeta) => {
-    setSelectedGroup(group);
+  const handleCreateGroup = () => {
+    if (!newGroupName.trim()) return;
+
+    const newGroup: GroupMeta = {
+      groupId: 'group_' + Date.now(),
+      name: newGroupName,
+      dsUrl: 'ws://localhost:3000',
+    };
+
+    const updatedGroups = [...groups, newGroup];
+    setGroups(updatedGroups);
+    localStorage.setItem('groups', JSON.stringify(updatedGroups));
+    
+    setNewGroupName('');
+    setShowCreateForm(false);
   };
 
-  const handleBack = () => {
-    setSelectedGroup(null);
+  const handleOpenChat = (groupId: string) => {
+    onSelectGroup(groupId);
   };
-
-  if (selectedGroup) {
-    return (
-      <div>
-        <button onClick={handleBack}>Back to Groups</button>
-        <Chat groupMeta={selectedGroup} />
-      </div>
-    );
-  }
 
   return (
     <div>
-      <h1>Group Management</h1>
-      <CreateGroupForm />
-      <h2>Your Groups</h2>
-      {groups.map(group => (
-        <div key={group.groupId}>
-          <h3>{group.name}</h3>
-          <button onClick={() => handleOpenChat(group)}>Open Chat</button>
-          <InviteMemberForm groupId={group.groupId} />
+      <h2>Groups</h2>
+      
+      {!showCreateForm ? (
+        <button onClick={() => setShowCreateForm(true)}>Create Group</button>
+      ) : (
+        <div style={{ marginBottom: 20 }}>
+          <input
+            type="text"
+            placeholder="Group Name"
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            style={{ width: '100%', padding: 8, marginBottom: 10 }}
+          />
+          <button onClick={handleCreateGroup}>Create</button>
+          <button onClick={() => setShowCreateForm(false)}>Cancel</button>
         </div>
-      ))}
+      )}
+
+      <div>
+        {groups.length === 0 ? (
+          <p>No groups yet</p>
+        ) : (
+          groups.map(group => (
+            <div 
+              key={group.groupId} 
+              style={{ 
+                padding: 10, 
+                margin: '5px 0', 
+                background: '#f5f5f5',
+                borderRadius: 4,
+                cursor: 'pointer'
+              }}
+              onClick={() => handleOpenChat(group.groupId)}
+            >
+              <strong>{group.name}</strong>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 };

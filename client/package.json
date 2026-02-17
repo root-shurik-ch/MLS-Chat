@@ -9,7 +9,10 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "playwright": "playwright",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -23,6 +26,8 @@
   "devDependencies": {
     "vitest": "^0.34.0",
     "@vitest/coverage-v8": "^0.34.0",
-    "jsdom": "^22.0.0"
+    "jsdom": "^22.0.0",
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.0.0"
   }
 }

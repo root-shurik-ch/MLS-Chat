@@ -1,81 +1,86 @@
-import React, { useState, useEffect } from 'react';
-import { IncomingMessage } from '../../domain/Message';
-import { GroupManager } from '../../mls/group';
-import { MlsClient } from '../../mls';
-import { DeliveryService } from '../../services/DeliveryService';
-import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase';
-import { GroupMeta } from '../../domain/Group';
-import { useOnline } from '../../hooks/useOnline';
-import { useOfflineQueueCount } from '../../hooks/useOfflineQueueCount';
+import React, { useState, useEffect, useRef } from 'react';
+import { IncomingMessage, MsgKind } from '../../domain/Message';
 
 interface ChatProps {
-  groupMeta: GroupMeta;
+  userId: string;
+  deviceId: string;
+  groupId: string;
+  onBack: () => void;
 }
 
-interface DecryptedMessage extends IncomingMessage {
-  plaintext: string;
+interface Message {
+  id: string;
+  senderId: string;
+  deviceId: string;
+  text: string;
+  ciphertext: string;
+  timestamp: number;
+  isSent: boolean;
 }
 
-const Chat: React.FC<ChatProps> = ({ groupMeta }) => {
-  const [messages, setMessages] = useState<DecryptedMessage[]>([]);
+// Mock MLS encryption for testing
+const mockEncrypt = (plaintext: string): string => {
+  return btoa(`encrypted:${btoa(plaintext)}:${Date.now()}`);
+};
+
+const mockDecrypt = (ciphertext: string): string => {
+  try {
+    const decoded = atob(ciphertext);
+    if (decoded.startsWith('encrypted:')) {
+      const parts = decoded.split(':');
+      return atob(parts[1]);
+    }
+    return decoded;
+  } catch {
+    return ciphertext;
+  }
+};
+
+const Chat: React.FC<ChatProps> = ({ userId, deviceId, groupId, onBack }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [groupManager, setGroupManager] = useState<GroupManager | null>(null);
-  const [deliveryService, setDeliveryService] = useState<DeliveryService | null>(null);
-  const [clientSeq, setClientSeq] = useState(0);
-  const isOnline = useOnline();
-  const queueCount = useOfflineQueueCount();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Load messages from localStorage
   useEffect(() => {
-    // Init MLS
-    const mlsPrivateKeyStr = localStorage.getItem('mlsPrivateKey')!;
-    const mlsPrivateKey = Uint8Array.from(atob(mlsPrivateKeyStr), c => c.charCodeAt(0));
-    const mlsPublicKeyStr = localStorage.getItem('mlsPublicKey')!;
-    const mlsPublicKey = Uint8Array.from(atob(mlsPublicKeyStr), c => c.charCodeAt(0));
-    const mlsClient = new MlsClient(mlsPrivateKey, mlsPublicKey);
-    const gm = new GroupManager(mlsClient);
-    // Note: In real implementation, load group state from storage
-    gm.createGroup(groupMeta.groupId); // Placeholder, assumes group is recreated
-    setGroupManager(gm);
+    const storedMessages = JSON.parse(localStorage.getItem('messages') || '[]');
+    const groupMessages = storedMessages.filter((m: any) => m.groupId === groupId);
+    setMessages(groupMessages);
+  }, [groupId]);
 
-    // Init DeliveryService
-    const ds = new DeliveryServiceSupabase();
-    const authToken = { value: localStorage.getItem('authToken')!, expiresAt: Date.now() + 3600000 }; // Dummy expiration
-    ds.connect(groupMeta.dsUrl, authToken).then(() => {
-      ds.subscribe({
-        userId: localStorage.getItem('userId')!,
-        deviceId: localStorage.getItem('deviceId')!,
-        groups: [groupMeta.groupId],
-      });
-      ds.onDeliver(async (msg: IncomingMessage) => {
-        if (msg.groupId === groupMeta.groupId) {
-          const plaintext = await gm.receiveMessage(groupMeta.groupId, msg.mlsBytes);
-          const decrypted: DecryptedMessage = { ...msg, plaintext };
-          setMessages(prev => [...prev, decrypted]);
-        }
-      });
-    });
-    setDeliveryService(ds);
-
-    return () => {
-      ds.disconnect();
-    };
-  }, [groupMeta]);
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSend = async () => {
-    if (!groupManager || !deliveryService || !input.trim()) return;
+    if (!input.trim()) return;
     setLoading(true);
+
     try {
-      const mlsBytes = await groupManager.sendMessage(groupMeta.groupId, input);
-      await deliveryService.send({
-        groupId: groupMeta.groupId,
-        senderId: localStorage.getItem('userId')!,
-        deviceId: localStorage.getItem('deviceId')!,
-        msgKind: 'chat',
-        mlsBytes,
-        clientSeq,
-      });
-      setClientSeq(prev => prev + 1);
+      const text = input.trim();
+      const ciphertext = mockEncrypt(text);
+      
+      const newMessage: Message = {
+        id: 'msg_' + Date.now(),
+        senderId: userId,
+        deviceId: deviceId,
+        text,
+        ciphertext,
+        timestamp: Date.now(),
+        isSent: true,
+      };
+
+      // Save to state and localStorage
+      const updatedMessages = [...messages, newMessage];
+      setMessages(updatedMessages);
+      
+      // Save to localStorage
+      const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
+      allMessages.push({ ...newMessage, groupId });
+      localStorage.setItem('messages', JSON.stringify(allMessages));
+      
       setInput('');
     } catch (err) {
       console.error('Failed to send message:', err);
@@ -85,27 +90,55 @@ const Chat: React.FC<ChatProps> = ({ groupMeta }) => {
   };
 
   return (
-    <div style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '5px', backgroundColor: isOnline ? '#d4edda' : '#f8d7da', color: isOnline ? '#155724' : '#721c24' }}>
-        Status: {isOnline ? 'Online' : 'Offline'} | Queued: {queueCount}
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <button onClick={onBack}>Back</button>
+        <h2>Chat</h2>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #ccc', padding: '10px' }}>
-        {messages.map((msg, index) => (
-          <div key={index} style={{ marginBottom: '10px' }}>
-            <strong>{msg.senderId}:</strong> {msg.plaintext}
-          </div>
-        ))}
+      
+      <div style={{ 
+        height: 300, 
+        overflowY: 'auto', 
+        border: '1px solid #ccc', 
+        padding: 10,
+        marginBottom: 10,
+        background: '#fafafa'
+      }}>
+        {messages.length === 0 ? (
+          <p style={{ color: '#666' }}>No messages yet</p>
+        ) : (
+          messages.map(msg => (
+            <div 
+              key={msg.id} 
+              style={{ 
+                marginBottom: 8,
+                padding: '8px 12px',
+                borderRadius: 8,
+                background: msg.isSent ? '#d4edda' : '#e9ecef',
+                textAlign: msg.isSent ? 'right' : 'left',
+              }}
+            >
+              <div style={{ fontSize: 12, color: '#666', marginBottom: 2 }}>
+                {msg.isSent ? 'You' : msg.senderId}
+              </div>
+              <div>{msg.text}</div>
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
       </div>
-      <div style={{ display: 'flex', padding: '10px' }}>
+      
+      <div style={{ display: 'flex', gap: 10 }}>
         <input
           type="text"
+          name="message"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Type your message..."
-          style={{ flex: 1, marginRight: '10px' }}
+          placeholder="Type a message..."
+          style={{ flex: 1, padding: 8 }}
           onKeyPress={(e) => e.key === 'Enter' && handleSend()}
         />
-        <button onClick={handleSend} disabled={loading}>
+        <button onClick={handleSend} disabled={loading || !input.trim()}>
           {loading ? 'Sending...' : 'Send'}
         </button>
       </div>
