@@ -6,14 +6,19 @@ export interface AuthToken {
 }
 
 export interface AuthService {
-  getChallenge(): Promise<{ challenge: string; }>;
+  getChallenge(action: 'register' | 'login'): Promise<{
+    challengeId: string;
+    challenge: string;
+    ttl: number;
+  }>;
 
   register(input: {
+    challengeId: string;
     userId: string;
+    deviceId: string;
     displayName: string;
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
-    deviceId: string;
     webauthnCreateResponse: PublicKeyCredential;
   }): Promise<{
     authToken: AuthToken;
@@ -21,6 +26,7 @@ export interface AuthService {
   }>;
 
   login(input: {
+    challengeId: string;
     userId: string;
     deviceId: string;
     webauthnGetResponse: PublicKeyCredential;
