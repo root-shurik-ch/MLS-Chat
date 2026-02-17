@@ -4,58 +4,58 @@ model: opencode/gpt-5-nano   # или другая coding-модель
 description: Primary coding agent for MLS chat project.
 
 ---
-Ты — coding-агент для проекта «MLS Chat».
+You are a coding agent for the MLS Chat project.
 
-## Цель проекта
+## Project Goal
 
-Нужно создать open source чат с end‑to‑end шифрованием на базе Messaging Layer Security (MLS).
+We need to create an open-source chat with end-to-end encryption based on Messaging Layer Security (MLS).
 
-Требования:
+Requirements:
 
-- Клиент — web-приложение (SPA) в браузере, включая iPhone.
-- Вся криптография MLS и всё состояние MLS-групп (деревья, ключи, история сообщений) хранятся целиком на клиенте.
-- Серверы (AS и DS) считаются недоверенными: они видят только шифртекст и публичные данные, никогда не видят приватные ключи MLS и не расшифровывают сообщения.
-- Архитектура должна быть облачно-агностичной: мы начинаем с Supabase, но протоколы и интерфейсы сервисов должны позволять легко переехать на AWS/Cloudflare/свой backend без изменения клиентского протокола.
+- Client — web application (SPA) in the browser, including iPhone.
+- All MLS cryptography and all MLS group state (trees, keys, message history) are stored entirely on the client.
+- Servers (AS and DS) are considered untrusted: they see only ciphertext and public data, never private MLS keys and never decrypt messages.
+- Architecture must be cloud-agnostic: we start with Supabase, but protocols and service interfaces must allow easy migration to AWS/Cloudflare/custom backend without changing the client protocol.
 
-## Компоненты
+## Components
 
-1. Web‑клиент (SPA)
-   - MLS-слой: WASM-библиотека MLS + TypeScript-обёртка.
+1. Web client (SPA)
+   - MLS layer: WASM library MLS + TypeScript wrapper.
    - Identity & key management: WebCrypto + IndexedDB.
-   - Слой сервисов:
-     - `AuthService` — HTTP/JSON клиент к Authentication Service.
-     - `DeliveryService` — WebSocket/JSON клиент к Delivery Service.
+   - Service layer:
+     - `AuthService` — HTTP/JSON client to Authentication Service.
+     - `DeliveryService` — WebSocket/JSON client to Delivery Service.
 
 2. Authentication Service (AS)
-   - Отвечает за регистрацию и логин пользователя через WebAuthn/passkeys.
-   - Хранит:
-     - профиль пользователя (`user_id`, `display_name`, `avatar_url?`);
-     - данные passkey (credential id, публичный ключ);
-     - публичный MLS-ключ (`mls_pk`);
-     - зашифрованный приватный MLS-ключ (`mls_sk_enc`).
-   - Никогда не хранит приватный MLS-ключ в открытом виде.
-   - Возвращает клиенту `auth_token`, `mls_sk_enc`, `mls_pk` и профиль.
+   - Handles user registration and login through WebAuthn/passkeys.
+   - Stores:
+     - user profile (`user_id`, `display_name`, `avatar_url?`);
+     - passkey data (credential id, public key);
+     - public MLS key (`mls_pk`);
+     - encrypted private MLS key (`mls_sk_enc`).
+   - Never stores private MLS key in plaintext.
+   - Returns `auth_token`, `mls_sk_enc`, `mls_pk` and profile to the client.
 
 3. Delivery Service (DS)
-   - Принимает зашифрованные MLS-сообщения от клиентов.
-   - Назначает `server_seq` для каждого сообщения в рамках `group_id`.
-   - Рассылает сообщения всем подписанным клиентам (WebSocket).
-   - Опционально хранит сообщения как офлайн-буфер с TTL.
-   - Не знает никаких MLS-ключей и не расшифровывает `mls_bytes`.
+   - Accepts encrypted MLS messages from clients.
+   - Assigns `server_seq` for each message within `group_id`.
+   - Broadcasts messages to all subscribed clients (WebSocket).
+   - Optionally stores messages as offline buffer with TTL.
+   - Does not know any MLS keys and does not decrypt `mls_bytes`.
 
-4. Supabase (первый провайдер)
+4. Supabase (first provider)
    - Postgres:
-     - `users` — данные AS.
-     - `groups`, `group_members` — метаданные групп.
-     - `group_seq`, `messages` — данные DS.
-   - Realtime — pub/sub по `group_id` (на основе изменений в таблицах или каналов).
-   - Edge Functions — HTTP endpoint’ы для `AuthService` и логики `DS.send`.
+     - `users` — AS data.
+     - `groups`, `group_members` — group metadata.
+     - `group_seq`, `messages` — DS data.
+   - Realtime — pub/sub by `group_id` (based on changes in tables or channels).
+   - Edge Functions — HTTP endpoints for `AuthService` and DS logic.
 
-Клиент должен зависеть только от абстрактных интерфейсов `AuthService` и `DeliveryService`. Любые Supabase-специфичные детали должны находиться в адаптерах и backend-коде, а не в доменных моделях или протоколах.
+The client must depend only on abstract interfaces `AuthService` and `DeliveryService`. Any Supabase-specific details must be in adapters and backend code, not in domain models or protocols.
 
-## Доменные модели (TypeScript)
+## Domain Models (TypeScript)
 
-### Пользователь
+### User
 
 `client/src/domain/User.ts`:
 
@@ -71,7 +71,7 @@ export interface UserAuthData {
   mlsPublicKey: string;     // base64 MLS identity public key
   mlsPrivateKeyEnc: string; // base64 encrypted MLS identity private key
 }
-Группа
+Group
 
 client/src/domain/Group.ts:
 
@@ -89,7 +89,7 @@ export interface GroupMember {
   userId: string;
   role: GroupRole;
 }
-Сообщения
+Messages
 
 client/src/domain/Message.ts:
 
@@ -112,7 +112,7 @@ export interface IncomingMessage {
   msgKind: MsgKind;
   mlsBytes: string;   // base64
 }
-Интерфейсы сервисов на клиенте
+Service Interfaces on Client
 AuthService
 
 client/src/services/AuthService.ts:
@@ -177,10 +177,10 @@ export interface DeliveryService {
 
   disconnect(): Promise<void>;
 }
-Протокол AuthService (HTTP, облачно-агностичный)
-Смотри файл spec/auth_service.md, следуй ему как источнику правды.
+AuthService Protocol (HTTP, cloud-agnostic)
+See file spec/auth_service.md, follow it as source of truth.
 
-Кратко:
+Briefly:
 
 POST /auth/register
 
@@ -229,12 +229,12 @@ json
     "avatarUrl": "string|null"
   }
 }
-Клиент использует WebAuthn чтобы получить секрет из passkey (например, через PRF), выводит из него ключ K_enc и расшифровывает mls_private_key_enc локально.
+Client uses WebAuthn to obtain secret from passkey (e.g., via PRF), derives K_enc from it and decrypts mls_private_key_enc locally.
 
-Протокол DeliveryService (WebSocket, облачно-агностичный)
-Смотри файл spec/delivery_service.md.
+DeliveryService Protocol (WebSocket, cloud-agnostic)
+See file spec/delivery_service.md.
 
-Кратко:
+Briefly:
 
 Client → DS subscribe:
 
@@ -278,10 +278,10 @@ json
   "msg_kind": "handshake" | "chat" | "control",
   "mls_bytes": "base64"
 }
-DS гарантирует монотонный server_seq по group_id.
+DS guarantees monotonic server_seq per group_id.
 
-Supabase: минимальные таблицы
-Считай, что в backend/supabase/tables/ есть:
+Supabase: minimal tables
+Consider that backend/supabase/tables/ has:
 
 users.sql:
 
@@ -329,30 +329,30 @@ create table if not exists public.messages (
   mls_bytes   text not null,
   primary key (group_id, server_seq)
 );
-Правила для тебя как для coding-агента
-ВСЕГДА считай spec/*.md источником правды по протоколам и структурам. Если меняешь протокол — сначала (или параллельно) обнови/предложи изменения в spec.
+Rules for you as coding agent
+ALWAYS consider spec/*.md as source of truth for protocols and structures. If you change the protocol — first (or in parallel) update/propose changes in spec.
 
-Никогда не добавляй Supabase-специфичные поля в доменные модели (UserProfile, GroupMeta, OutgoingMessage, IncomingMessage) и протоколы AuthService / DeliveryService. Supabase-логика должна быть только в:
+Never add Supabase-specific fields in domain models (UserProfile, GroupMeta, OutgoingMessage, IncomingMessage) and protocols AuthService / DeliveryService. Supabase logic should be only in:
 
-адаптерах (AuthServiceSupabase, DeliveryServiceSupabase);
+adapters (AuthServiceSupabase, DeliveryServiceSupabase);
 
-SQL и Edge Functions в backend/supabase.
+SQL and Edge Functions in backend/supabase.
 
-Вся криптография MLS и хранение MLS-состояния (ключи, деревья, история) — только на клиенте. AS и DS работают только с шифртекстом и публичными данными.
+All MLS cryptography and MLS state storage (keys, trees, history) — only on client. AS and DS work only with ciphertext and public data.
 
-Аутентификация — только через WebAuthn/passkeys. Не вводи пароли. Регистрация и логин должны соответствовать протоколу AuthService.
+Authentication — only through WebAuthn/passkeys. Do not introduce passwords. Registration and login must correspond to AuthService protocol.
 
-Пиши чистый, типизированный код (TypeScript на клиенте). Структурируй файлы согласно уже заданной структуре репозитория.
+Write clean, typed code (TypeScript on client). Structure files according to the already set repository structure.
 
-Думай о переносимости: всё, что относится к протоколам и интерфейсам, должно одинаково работать при реализации AS/DS на Supabase, AWS, Cloudflare или кастомном backend.
+Think about portability: everything related to protocols and interfaces should work identically when implementing AS/DS on Supabase, AWS, Cloudflare or custom backend.
 
-Когда тебя просят «реализовать Х»:
+When asked to "implement X":
 
-сначала посмотри spec в spec/*.md;
+first look at spec in spec/*.md;
 
-затем обнови/создай интерфейсы в client/src/domain или client/src/services;
+then update/create interfaces in client/src/domain or client/src/services;
 
-потом напиши код адаптера под Supabase и соответствующие SQL / Edge Functions.
+then write adapter code under Supabase and corresponding SQL / Edge Functions.
 
 ## MLS Security Properties
 

@@ -1,103 +1,103 @@
 # Final Implementation Plan for MLS Chat MVP
 
-## Обзор Фазы
+## Phase Overview
 
-Эта фаза представляет собой финальную реализацию MVP для MLS Chat — open-source чата с end-to-end шифрованием на базе Messaging Layer Security (MLS). MVP включает:
+This phase represents the final implementation of the MLS Chat MVP — an open-source chat with end-to-end encryption based on Messaging Layer Security (MLS). The MVP includes:
 
-- Web-клиент (SPA) с поддержкой браузеров, включая iPhone.
-- Authentication Service (AS) для регистрации и логина через WebAuthn.
-- Delivery Service (DS) для доставки зашифрованных сообщений.
-- Первичная реализация на Supabase с облачно-агностичной архитектурой.
+- Web client (SPA) with support for browsers, including iPhone.
+- Authentication Service (AS) for registration and login via WebAuthn.
+- Delivery Service (DS) for delivery of encrypted messages.
+- Initial implementation on Supabase with cloud-agnostic architecture.
 
-Цель: Доставить функциональный MVP, где пользователи могут регистрироваться, создавать группы, отправлять и получать зашифрованные сообщения, с полным контролем криптографии на клиенте.
+The goal: Deliver a functional MVP where users can register, create groups, send and receive encrypted messages, with full control of cryptography on the client.
 
-## Задачи
+## Tasks
 
 ### High Priority
 
-1. **Реализация MLS-слоя в WASM**
-   - **Описание**: Создать WASM-библиотеку на базе MLS для клиента, включая TypeScript-обёртку. Обеспечить хранение всего MLS-состояния (деревья, ключи, история) на клиенте в IndexedDB.
+1. **Implement MLS Layer in WASM**
+   - **Description**: Create a WASM library based on MLS for the client, including a TypeScript wrapper. Ensure storage of all MLS state (trees, keys, history) on the client in IndexedDB.
    - **Acceptance Criteria**:
-     - MLS-операции (key exchange, encryption/decryption) работают в браузере.
-     - Состояние сохраняется локально и восстанавливается при перезагрузке.
-     - Интеграция с WebCrypto для дополнительных ключей.
-   - **Зависимости**: Доступ к MLS-спецификациям и WASM toolchain.
+     - MLS operations (key exchange, encryption/decryption) work in the browser.
+     - State is saved locally and restored on reload.
+     - Integration with WebCrypto for additional keys.
+   - **Dependencies**: Access to MLS specifications and WASM toolchain.
 
-2. **Web-клиент UI и Core Logic**
-   - **Описание**: Разработать SPA на React/Vue с компонентами для регистрации, логина, списка групп, чата, управления группами.
+2. **Web Client UI and Core Logic**
+   - **Description**: Develop an SPA on React/Vue with components for registration, login, group list, chat, group management.
    - **Acceptance Criteria**:
-     - UI адаптивен для мобильных устройств (включая iPhone).
-     - Поддержка WebAuthn обязательна; ошибка если не поддерживается.
-     - Сообщения отображаются с расшифровкой в реальном времени.
-     - Клиент зависит только от абстрактных интерфейсов AuthService и DeliveryService.
+     - UI is adaptive for mobile devices (including iPhone).
+     - WebAuthn support is mandatory; error if not supported.
+     - Messages are displayed with real-time decryption.
+     - Client depends only on abstract interfaces AuthService and DeliveryService.
 
-3. **Authentication Service (AS) на Supabase**
-   - **Описание**: Реализовать AS как Supabase Edge Function. Хранить профили пользователей, passkey данные, публичные MLS-ключи и зашифрованные приватные ключи.
+3. **Authentication Service (AS) on Supabase**
+   - **Description**: Implement AS as a Supabase Edge Function. Store user profiles, passkey data, public MLS keys, and encrypted private MLS keys.
    - **Acceptance Criteria**:
-     - Регистрация и логин через WebAuthn API.
-     - Никогда не хранит приватные MLS-ключи в открытом виде.
-     - Соответствует протоколу из spec/auth_service.md.
-     - WebAuthn обязателен: hardware keys, Android biometric, iOS Face ID/Touch ID.
+     - Registration and login via WebAuthn API.
+     - Never stores MLS private keys in plaintext.
+     - Corresponds to the protocol from spec/auth_service.md.
+     - WebAuthn is mandatory: hardware keys, Android biometric, iOS Face ID/Touch ID.
      - Target browsers: Chrome 67+, Firefox 60+, Safari 14+, Edge 18+.
-     - Если браузер не поддерживает — показать ошибку: "WebAuthn required. Update browser or use compatible device."
+     - If the browser does not support — show error: "WebAuthn required. Update browser or use compatible device."
 
-4. **Delivery Service (DS) на Supabase**
-   - **Описание**: Реализовать DS как Supabase Realtime/WebSocket. Принимать и рассылать зашифрованные MLS-сообщения, назначать server_seq.
+4. **Delivery Service (DS) on Supabase**
+   - **Description**: Implement DS as Supabase Realtime/WebSocket. Accept and broadcast encrypted MLS messages, assign server_seq.
    - **Acceptance Criteria**:
-     - WebSocket соединение с аутентификацией.
-     - Монотонный server_seq по group_id.
-     - Не расшифровывает mls_bytes.
-     - Соответствует протоколу из spec/delivery_service.md.
+     - WebSocket connection with authentication.
+     - Monotonic server_seq per group_id.
+     - Does not decrypt mls_bytes.
+     - Corresponds to the protocol from spec/delivery_service.md.
 
-5. **Интеграция WebAuthn и Key Management**
-   - **Описание**: Внедрить WebAuthn в клиент для генерации и использования passkeys. Использовать PRF для вывода K_enc из passkey секрета для расшифровки mls_private_key_enc.
+5. **WebAuthn and Key Management Integration**
+   - **Description**: Integrate WebAuthn in the client for passkey generation and usage. Use PRF to derive K_enc from passkey secret for mls_private_key_enc decryption.
    - **Acceptance Criteria**:
-     - Нет fallback на пароли — WebAuthn обязателен.
-     - Поддержка всех типов: hardware keys, biometric.
-     - Ошибка если navigator.credentials не поддерживается.
+     - No fallback to passwords — WebAuthn is mandatory.
+     - Support for all types: hardware keys, biometric.
+     - Error if navigator.credentials is not supported.
 
 ### Medium Priority
 
-6. **Supabase Tables и Schema**
-   - **Описание**: Создать и настроить таблицы: users, groups, group_members, messages, group_seq.
-   - **Acceptance Criteria**: Схема соответствует спецификациям, с RLS политиками для безопасности.
+6. **Supabase Tables and Schema**
+   - **Description**: Create and configure tables: users, groups, group_members, messages, group_seq.
+   - **Acceptance Criteria**: Schema corresponds to specifications, with RLS policies for security.
 
-7. **E2E Testing и Security Audit**
-   - **Описание**: Написать тесты для шифрования, аутентификации, доставки сообщений.
-   - **Acceptance Criteria**: Все тесты проходят; аудит подтверждает E2E шифрование без утечек.
+7. **E2E Testing and Security Audit**
+   - **Description**: Write tests for encryption, authentication, message delivery.
+   - **Acceptance Criteria**: All tests pass; audit confirms E2E encryption without leaks.
 
 ### Low Priority
 
-8. **Документация и Deployment**
-   - **Описание**: Обновить README, spec файлы; настроить CI/CD для deployment на Vercel/Netlify.
-   - **Acceptance Criteria**: Проект готов к open-source release.
+8. **Documentation and Deployment**
+   - **Description**: Update README, spec files; set up CI/CD for deployment on Vercel/Netlify.
+   - **Acceptance Criteria**: Project is ready for open-source release.
 
-## Зависимости
+## Dependencies
 
-- Завершенные спецификации в spec/*.md.
-- Доступ к Supabase project.
-- WASM toolchain (Emscripten или аналог).
+- Completed specifications in spec/*.md.
+- Access to Supabase project.
+- WASM toolchain (Emscripten or similar).
 - MLS reference implementation (e.g., openmls).
-- Браузеры для тестирования.
+- Browsers for testing.
 
-## Критерии Успеха
+## Success Criteria
 
-- Пользователи могут зарегистрироваться/залогиниться через WebAuthn.
-- Создавать группы и приглашать участников.
-- Отправлять и получать сообщения с end-to-end шифрованием.
-- Все криптография на клиенте; серверы видят только шифртекст.
-- MVP работает в target browsers без ошибок.
+- Users can register/login via WebAuthn.
+- Create groups and invite participants.
+- Send and receive messages with end-to-end encryption.
+- All cryptography on the client; servers see only ciphertext.
+- MVP works in target browsers without errors.
 
-## Ресурсы
+## Resources
 
-- Разработчики: 2-3 full-stack devs с опытом TypeScript, React, WASM, Supabase.
-- Инструменты: Node.js, Rust (для WASM), Supabase CLI, GitHub.
-- Время: 4-6 недель на фазу.
+- Developers: 2-3 full-stack devs with experience in TypeScript, React, WASM, Supabase.
+- Tools: Node.js, Rust (for WASM), Supabase CLI, GitHub.
+- Time: 4-6 weeks for the phase.
 
-## Риски
+## Risks
 
-- **WebAuthn Support**: Если пользовательский браузер не поддерживает WebAuthn (старые версии), показать четкую ошибку с инструкциями по обновлению или использованию compatible device. Риск: Пользователи на устаревших браузерах; Mitigation: Target modern browsers, fallback error.
-- **MLS Complexity**: Реализация MLS в WASM может быть сложной; Mitigation: Использовать существующие библиотеки.
-- **Security Leaks**: Неправильная обработка ключей; Mitigation: Code review и audit.
-- **Performance**: Шифрование в браузере на мобильных; Mitigation: Оптимизировать WASM.
-- **Supabase Limits**: Бесплатный tier ограничен; Mitigation: Мониторить использование, план на upgrade.
+- **WebAuthn Support**: If the user's browser does not support WebAuthn (old versions), show a clear error with instructions to update or use a compatible device. Risk: Users on outdated browsers; Mitigation: Target modern browsers, fallback error.
+- **MLS Complexity**: Implementing MLS in WASM may be complex; Mitigation: Use existing libraries.
+- **Security Leaks**: Improper key handling; Mitigation: Code review and audit.
+- **Performance**: Encryption in the browser on mobile; Mitigation: Optimize WASM.
+- **Supabase Limits**: Free tier is limited; Mitigation: Monitor usage, plan for upgrade.
