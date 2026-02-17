@@ -1,6 +1,3 @@
-use openmls::prelude::*;
-use openmls_basic_credential::SignatureKeyPair;
-use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
