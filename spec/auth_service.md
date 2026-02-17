@@ -20,6 +20,7 @@ Response body:
 
 ```json
 {
+  "challenge_id": "uuid",
   "challenge": "base64-encoded-challenge",
   "ttl": 300000
 }
@@ -33,6 +34,7 @@ Request body:
 
 ```json
 {
+  "challenge_id": "uuid",
   "user_id": "string",
   "device_id": "string",
   "display_name": "string",
@@ -62,6 +64,7 @@ Request body:
 
 ```json
 {
+  "challenge_id": "uuid",
   "user_id": "string",
   "device_id": "string",
   "webauthn_get_response": {}
