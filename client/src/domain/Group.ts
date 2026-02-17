@@ -10,6 +10,7 @@ export type GroupRole = 'member' | 'admin';
 
 export interface GroupMember {
   userId: string;
+  deviceId: string;
   role: GroupRole;
 }
 
