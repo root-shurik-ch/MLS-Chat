@@ -9,5 +9,4 @@ export interface UserAuthData {
   mlsPublicKey: string;     // base64 MLS identity public key
   mlsPrivateKeyEnc: string; // base64 encrypted MLS identity private key
   deviceId: string;
-  lastSyncTime: number;     // epoch ms
 }

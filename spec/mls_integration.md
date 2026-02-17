@@ -2,6 +2,8 @@
 
 This document describes how MLS (Messaging Layer Security) is integrated into the client-side chat application. All MLS state and cryptography reside on the client; servers only handle ciphertext routing.
 
+See RFC 9750 for MLS protocol details. See identity_and_passkeys.md for key management.
+
 ## Database Tables
 
 The following Supabase tables support MLS integration:
@@ -14,17 +16,10 @@ The following Supabase tables support MLS integration:
 
 Each device has its own MLS identity keypair, enabling multi-device support per user.
 
-### key_packages
-- `key_package_hash` (text, primary key): Hash of the KeyPackage for uniqueness.
-- `device_id` (text, fk to devices): Owning device.
-- `key_package_data` (text): Serialized KeyPackage (base64).
-
-KeyPackages are used for inviting devices into groups.
-
 ## Creating a New Group
 
 1. Client generates a new Group ID (UUID).
-2. Create MLS Group with initial member (self).
+2. Create MLS Group with initial member (self, deviceId).
 3. Generate KeyPackage for self.
 4. Send initial handshake message (Commit) via DS.
 5. Store group metadata in IndexedDB.
@@ -33,7 +28,7 @@ KeyPackages are used for inviting devices into groups.
 
 To add a member:
 
-1. Obtain the new member's KeyPackage (from their public data).
+1. Obtain the new member's KeyPackage (from their deviceId).
 2. Propose Add proposal.
 3. Send Commit to apply the proposal.
 4. DS delivers the Commit and Welcome message (RFC 9750) to the new member.
@@ -63,7 +58,6 @@ MLS state is stored in IndexedDB on the client:
 On the server side, the following Supabase tables manage device and key data:
 
 - `devices`: See [Database Tables](#database-tables).
-- `key_packages`: See [Database Tables](#database-tables).
 
 ## Encryption/Decryption Flow
 
@@ -85,11 +79,3 @@ Epochs provide forward secrecy (FS) and post-compromise security (PCS).
 - Each Commit advances the epoch.
 - Old keys are discarded after epoch change.
 - Clients must process Commits in order before application messages.
-
-## KeyPackage Lifecycle
-
-- Generated per device upon registration or login.
-- Uploaded to `key_packages` table after generation.
-- Retrieved by other users to invite devices into groups.
-- Refreshed periodically or after use to maintain security.
-- Deleted from table when device is removed or key is compromised.

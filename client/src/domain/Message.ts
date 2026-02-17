@@ -15,6 +15,5 @@ export interface IncomingMessage {
   deviceId: string;
   msgKind: MsgKind;
   mlsBytes: string;   // base64
-  isDelivered: boolean;
 }
 

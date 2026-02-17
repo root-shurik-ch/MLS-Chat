@@ -4,10 +4,10 @@ create table if not exists public.group_seq (
 );
 
 create table if not exists public.messages (
-  group_id    text not null,
+  group_id    text not null references public.groups(group_id),
   server_seq  bigint not null,
   server_time timestamptz not null default now(),
-  sender_id   text not null,
+  sender_id   text not null references public.devices(device_id),
   device_id   text not null references public.devices(device_id),
   msg_kind    text not null,
   mls_bytes   text not null,
