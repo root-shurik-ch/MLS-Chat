@@ -2,6 +2,8 @@ export type MsgKind = 'handshake' | 'chat' | 'control';
 
 export interface OutgoingMessage {
   groupId: string;
+  senderId: string;
+  deviceId: string;
   msgKind: MsgKind;
   mlsBytes: string;   // base64
   clientSeq: number;

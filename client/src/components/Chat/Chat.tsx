@@ -5,6 +5,8 @@ import { MlsClient } from '../../mls';
 import { DeliveryService } from '../../services/DeliveryService';
 import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase';
 import { GroupMeta } from '../../domain/Group';
+import { useOnline } from '../../hooks/useOnline';
+import { useOfflineQueueCount } from '../../hooks/useOfflineQueueCount';
 
 interface ChatProps {
   groupMeta: GroupMeta;
@@ -21,6 +23,8 @@ const Chat: React.FC<ChatProps> = ({ groupMeta }) => {
   const [groupManager, setGroupManager] = useState<GroupManager | null>(null);
   const [deliveryService, setDeliveryService] = useState<DeliveryService | null>(null);
   const [clientSeq, setClientSeq] = useState(0);
+  const isOnline = useOnline();
+  const queueCount = useOfflineQueueCount();
 
   useEffect(() => {
     // Init MLS
@@ -82,6 +86,9 @@ const Chat: React.FC<ChatProps> = ({ groupMeta }) => {
 
   return (
     <div style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '5px', backgroundColor: isOnline ? '#d4edda' : '#f8d7da', color: isOnline ? '#155724' : '#721c24' }}>
+        Status: {isOnline ? 'Online' : 'Offline'} | Queued: {queueCount}
+      </div>
       <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #ccc', padding: '10px' }}>
         {messages.map((msg, index) => (
           <div key={index} style={{ marginBottom: '10px' }}>

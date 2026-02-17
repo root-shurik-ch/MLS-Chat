@@ -1,11 +1,11 @@
 import type { AuthToken } from './AuthService';
 import type { MsgKind, IncomingMessage, OutgoingMessage } from '../domain/Message';
 import type { DeliveryService } from './DeliveryService';
+import { saveToQueue, getQueue, removeFromQueue, QueuedMessage } from '../utils/offlineQueue';
 
 export class DeliveryServiceSupabase implements DeliveryService {
   private ws: WebSocket | null = null;
   private authToken: AuthToken | null = null;
-  private offlineQueue: OutgoingMessage[] = [];
   private deliverHandler: ((msg: IncomingMessage) => void) | null = null;
 
   async connect(dsUrl: string, authToken: AuthToken): Promise<void> {
@@ -67,6 +67,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
           if (data.type === "subscribed") {
             clearTimeout(timeout);
             this.ws!.onmessage = originalOnMessage;
+            this.syncOffline(); // Sync offline messages after subscribe
             resolve();
           } else if (data.error) {
             clearTimeout(timeout);
@@ -100,6 +101,8 @@ export class DeliveryServiceSupabase implements DeliveryService {
     } else {
       await this.enqueueOffline({
         groupId: msg.groupId,
+        senderId: msg.senderId,
+        deviceId: msg.deviceId,
         msgKind: msg.msgKind,
         mlsBytes: msg.mlsBytes,
         clientSeq: msg.clientSeq,
@@ -119,20 +122,28 @@ export class DeliveryServiceSupabase implements DeliveryService {
   }
 
   async enqueueOffline(msg: OutgoingMessage): Promise<void> {
-    this.offlineQueue.push(msg);
-    // TODO: Store in IndexedDB
+    await saveToQueue(msg);
   }
 
   async syncOffline(): Promise<void> {
     if (!navigator.onLine || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    for (const msg of this.offlineQueue) {
-      // Note: need senderId, deviceId for send, but OutgoingMessage doesn't have
-      // Assume we have them from context
-      // For now, skip or add to OutgoingMessage
-      // TODO: fix
-      console.warn("syncOffline not fully implemented");
+    const queue: QueuedMessage[] = await getQueue();
+    for (const msg of queue) {
+      try {
+        this.ws.send(JSON.stringify({
+          type: "send",
+          group_id: msg.groupId,
+          sender_id: msg.senderId,
+          device_id: msg.deviceId,
+          msg_kind: msg.msgKind,
+          mls_bytes: msg.mlsBytes,
+          client_seq: msg.clientSeq,
+        }));
+        // Assuming success, remove from queue
+        await removeFromQueue(msg.id);
+      } catch (e) {
+        console.error('Failed to send queued message:', e);
+      }
     }
-    this.offlineQueue = [];
-    // TODO: Clear IndexedDB
   }
 }
