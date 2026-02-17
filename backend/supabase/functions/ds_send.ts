@@ -5,53 +5,119 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-serve(async (req: Request) => {
-  if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
-  }
+// Global map for channels per group
+const groupChannels = new Map<string, any>();
 
-  const body = await req.json();
-  const {
-    group_id,
-    sender_id,
-    device_id,
-    msg_kind,
-    mls_bytes,
-    client_seq,
-  } = body;
-
-  // Get current seq
-  const { data: seqData } = await supabase
-    .from("group_seq")
-    .select("last_server_seq")
-    .eq("group_id", group_id)
-    .single();
-
-  const server_seq = (seqData?.last_server_seq || 0) + 1;
-
-  // Insert message
-  const { error } = await supabase
-    .from("messages")
-    .insert({
-      group_id,
-      server_seq,
-      sender_id,
-      device_id,
-      msg_kind,
-      mls_bytes,
+function getGroupChannel(groupId: string) {
+  if (!groupChannels.has(groupId)) {
+    const channel = supabase.realtime.channel(`group-${groupId}`, {
+      config: { broadcast: { self: true } },
     });
+    groupChannels.set(groupId, channel);
+  }
+  return groupChannels.get(groupId);
+}
 
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+serve(async (req: Request) => {
+  if (req.headers.get("upgrade") !== "websocket") {
+    return new Response("Expected WebSocket", { status: 400 });
   }
 
-  // Update seq
-  await supabase
-    .from("group_seq")
-    .upsert({ group_id, last_server_seq: server_seq });
+  const { socket, response } = Deno.upgradeWebSocket(req);
 
-  // Broadcast via Realtime (simplified)
-  // Assume Realtime channel for group_id
+  const subscribedGroups = new Set<string>();
+  const userId: string | null = null;
+  const deviceId: string | null = null;
 
-  return new Response(JSON.stringify({ server_seq }), { status: 200 });
+  socket.onopen = () => {
+    console.log("WebSocket opened");
+  };
+
+  socket.onmessage = async (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.type === "subscribe") {
+        const { user_id, device_id, groups, auth } = data;
+
+        // Verify user exists
+        const { data: userData } = await supabase
+          .from("users")
+          .select("user_id")
+          .eq("user_id", user_id)
+          .single();
+        if (!userData) {
+          throw new Error("Invalid user");
+        }
+
+        // Verify device belongs to user
+        const { data: deviceData } = await supabase
+          .from("devices")
+          .select("user_id")
+          .eq("device_id", device_id)
+          .single();
+        if (!deviceData || deviceData.user_id !== user_id) {
+          throw new Error("Invalid device");
+        }
+
+        // TODO: Verify auth token if needed
+
+        for (const group_id of groups) {
+          const channel = getGroupChannel(group_id);
+          channel.subscribe((status: string) => {
+            if (status === "SUBSCRIBED") {
+              console.log(`Subscribed to ${group_id}`);
+            }
+          });
+          subscribedGroups.add(group_id);
+        }
+
+        socket.send(JSON.stringify({ type: "subscribed", groups }));
+      } else if (data.type === "send") {
+        const { group_id, sender_id, device_id, msg_kind, mls_bytes, client_seq } = data;
+
+        // Use RPC to send message atomically
+        const { data: result, error } = await supabase.rpc('send_message', {
+          p_group_id: group_id,
+          p_sender_id: sender_id,
+          p_device_id: device_id,
+          p_msg_kind: msg_kind,
+          p_mls_bytes: mls_bytes,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        const { server_seq, server_time } = result[0];
+
+        // Broadcast to group channel
+        const channel = getGroupChannel(group_id);
+        await channel.send({
+          type: 'broadcast',
+          event: 'message',
+          payload: {
+            type: "deliver",
+            group_id,
+            server_seq,
+            server_time,
+            sender_id,
+            device_id,
+            msg_kind,
+            mls_bytes,
+          },
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      socket.send(JSON.stringify({ error: e.message }));
+    }
+  };
+
+  socket.onclose = () => {
+    console.log("WebSocket closed");
+    // Note: Channels remain for other connections
+  };
+
+  return response;
 });
