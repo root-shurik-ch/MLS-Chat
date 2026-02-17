@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GroupManager } from '../../mls/group';
 import { MlsClient } from '../../mls/index';
 import { GroupMeta } from '../../domain/Group';
+import { IndexedDBStorage } from '../../utils/storage';
 
 const CreateGroupForm: React.FC = () => {
   const [name, setName] = useState('');
@@ -18,10 +19,21 @@ const CreateGroupForm: React.FC = () => {
       const groupId = crypto.randomUUID();
       const userId = localStorage.getItem('userId')!;
       const deviceId = localStorage.getItem('deviceId')!;
-      const mlsPrivateKeyStr = localStorage.getItem('mlsPrivateKey')!;
+
+      // Load MLS keys from secure IndexedDB storage
+      const keyStorage = new IndexedDBStorage('mls-keys', 'keys');
+      await keyStorage.init();
+      
+      const mlsPrivateKeyStr = await keyStorage.get(`mlsPrivateKey_${userId}_${deviceId}`);
+      const mlsPublicKeyStr = await keyStorage.get(`mlsPublicKey_${userId}_${deviceId}`);
+      
+      if (!mlsPrivateKeyStr || !mlsPublicKeyStr) {
+        throw new Error('MLS keys not found. Please log in again.');
+      }
+
       const mlsPrivateKey = Uint8Array.from(atob(mlsPrivateKeyStr), c => c.charCodeAt(0));
-      const mlsPublicKeyStr = localStorage.getItem('mlsPublicKey')!;
       const mlsPublicKey = Uint8Array.from(atob(mlsPublicKeyStr), c => c.charCodeAt(0));
+      
       const mlsClient = new MlsClient(mlsPrivateKey, mlsPublicKey);
       const groupManager = new GroupManager(mlsClient);
       await groupManager.createGroup(groupId);
@@ -34,10 +46,10 @@ const CreateGroupForm: React.FC = () => {
         currentEpoch: 0,
       };
 
-      // Store in localStorage for now
-      const groups = JSON.parse(localStorage.getItem('groups') || '[]');
-      groups.push(groupMeta);
-      localStorage.setItem('groups', JSON.stringify(groups));
+      // Store group metadata in IndexedDB
+      const groupStorage = new IndexedDBStorage('mls-groups', 'groups');
+      await groupStorage.init();
+      await groupStorage.set(groupId, groupMeta);
 
       alert('Group created!');
       // TODO: navigate or refresh

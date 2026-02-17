@@ -3,6 +3,7 @@ import { GroupManager } from '../../mls/group';
 import { MlsClient } from '../../mls/index';
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase';
+import { IndexedDBStorage } from '../../utils/storage';
 
 const InviteMemberForm: React.FC<{ groupId: string }> = ({ groupId }) => {
   const [userId, setUserId] = useState('');
@@ -16,12 +17,23 @@ const InviteMemberForm: React.FC<{ groupId: string }> = ({ groupId }) => {
 
     try {
       const deviceId = localStorage.getItem('deviceId')!;
+      const currentUserId = localStorage.getItem('userId')!;
+      
+      // Load MLS keys from secure IndexedDB storage
+      const keyStorage = new IndexedDBStorage('mls-keys', 'keys');
+      await keyStorage.init();
+      
+      const mlsPrivateKeyStr = await keyStorage.get(`mlsPrivateKey_${currentUserId}_${deviceId}`);
+      const mlsPublicKeyStr = await keyStorage.get(`mlsPublicKey_${currentUserId}_${deviceId}`);
+      
+      if (!mlsPrivateKeyStr || !mlsPublicKeyStr) {
+        throw new Error('MLS keys not found. Please log in again.');
+      }
+
       const authService = new AuthServiceSupabase('https://your-supabase-url.supabase.co/functions/v1');
       const keyPackage = await authService.getKeyPackage(userId, deviceId);
 
-      const mlsPrivateKeyStr = localStorage.getItem('mlsPrivateKey')!;
       const mlsPrivateKey = Uint8Array.from(atob(mlsPrivateKeyStr), c => c.charCodeAt(0));
-      const mlsPublicKeyStr = localStorage.getItem('mlsPublicKey')!;
       const mlsPublicKey = Uint8Array.from(atob(mlsPublicKeyStr), c => c.charCodeAt(0));
       const mlsClient = new MlsClient(mlsPrivateKey, mlsPublicKey);
       const groupManager = new GroupManager(mlsClient);
@@ -33,7 +45,7 @@ const InviteMemberForm: React.FC<{ groupId: string }> = ({ groupId }) => {
       await deliveryService.connect('wss://your-ds-url', authToken);
       await deliveryService.send({
         groupId,
-        senderId: localStorage.getItem('userId')!,
+        senderId: currentUserId,
         deviceId,
         msgKind: 'handshake',
         mlsBytes,
