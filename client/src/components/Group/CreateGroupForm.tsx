@@ -3,12 +3,16 @@ import { GroupManager } from '../../mls/group';
 import { MlsClient } from '../../mls/index';
 import { GroupMeta } from '../../domain/Group';
 import { IndexedDBStorage } from '../../utils/storage';
+import { useToastContext } from '../../contexts/ToastContext';
 
 const CreateGroupForm: React.FC = () => {
   const [name, setName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Toast notifications
+  const toast = useToastContext();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,11 +55,13 @@ const CreateGroupForm: React.FC = () => {
       await groupStorage.init();
       await groupStorage.set(groupId, groupMeta);
 
-      alert('Group created!');
+      toast.success('Group created successfully!');
       // TODO: navigate or refresh
       window.location.reload(); // simple refresh
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create group');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to create group';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

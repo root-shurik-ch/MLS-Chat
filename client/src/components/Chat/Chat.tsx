@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { IncomingMessage, MsgKind } from '../../domain/Message';
+import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase';
+import { MlsClient, MlsGroup } from '../../mls/index';
+import { useToastContext } from '../../contexts/ToastContext';
+import InviteLink from '../Group/InviteLink';
 
 interface ChatProps {
   userId: string;
   deviceId: string;
   groupId: string;
+  mlsGroup: MlsGroup;
+  mlsClient: MlsClient;
+  deliveryService: DeliveryServiceSupabase;
   onBack: () => void;
 }
 
@@ -13,134 +20,353 @@ interface Message {
   senderId: string;
   deviceId: string;
   text: string;
-  ciphertext: string;
   timestamp: number;
+  serverSeq?: number;
   isSent: boolean;
+  isPending?: boolean;
 }
 
-// Mock MLS encryption for testing
-const mockEncrypt = (plaintext: string): string => {
-  return btoa(`encrypted:${btoa(plaintext)}:${Date.now()}`);
-};
-
-const mockDecrypt = (ciphertext: string): string => {
-  try {
-    const decoded = atob(ciphertext);
-    if (decoded.startsWith('encrypted:')) {
-      const parts = decoded.split(':');
-      return atob(parts[1]);
-    }
-    return decoded;
-  } catch {
-    return ciphertext;
-  }
-};
-
-const Chat: React.FC<ChatProps> = ({ userId, deviceId, groupId, onBack }) => {
+const Chat: React.FC<ChatProps> = ({
+  userId,
+  deviceId,
+  groupId,
+  mlsGroup,
+  mlsClient,
+  deliveryService,
+  onBack
+}) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [clientSeq, setClientSeq] = useState(1);
+  const [showInvite, setShowInvite] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load messages from localStorage
-  useEffect(() => {
-    const storedMessages = JSON.parse(localStorage.getItem('messages') || '[]');
-    const groupMessages = storedMessages.filter((m: any) => m.groupId === groupId);
-    setMessages(groupMessages);
-  }, [groupId]);
+  // Toast notifications
+  const toast = useToastContext();
 
-  // Auto-scroll to bottom
+  // Subscribe to group and handle incoming messages
+  useEffect(() => {
+    let mounted = true;
+
+    const setupDelivery = async () => {
+      try {
+        // Subscribe to this group
+        console.log('Subscribing to group:', groupId);
+        await deliveryService.subscribe({
+          userId,
+          deviceId,
+          groups: [groupId]
+        });
+
+        // Handle incoming messages
+        deliveryService.onDeliver(async (msg: IncomingMessage) => {
+          if (!mounted) return;
+
+          // Skip our own messages
+          if (msg.senderId === userId && msg.deviceId === deviceId) {
+            return;
+          }
+
+          try {
+            // Decrypt MLS message
+            console.log('Decrypting message from', msg.senderId);
+            const plaintext = await mlsClient.decryptMessage(
+              mlsGroup,
+              msg.mlsBytes
+            );
+
+            // Add to messages
+            const newMessage: Message = {
+              id: `msg_${msg.serverSeq}`,
+              senderId: msg.senderId,
+              deviceId: msg.deviceId,
+              text: plaintext,
+              timestamp: msg.serverTime,
+              serverSeq: msg.serverSeq,
+              isSent: false,
+            };
+
+            setMessages(prev => {
+              // Avoid duplicates
+              if (prev.some(m => m.serverSeq === msg.serverSeq)) {
+                return prev;
+              }
+              return [...prev, newMessage].sort((a, b) => {
+                if (a.serverSeq && b.serverSeq) {
+                  return a.serverSeq - b.serverSeq;
+                }
+                return a.timestamp - b.timestamp;
+              });
+            });
+          } catch (error) {
+            console.error('Failed to decrypt message:', error);
+          }
+        });
+
+        console.log('Delivery setup complete');
+      } catch (error) {
+        console.error('Failed to setup delivery:', error);
+      }
+    };
+
+    setupDelivery();
+
+    return () => {
+      mounted = false;
+    };
+  }, [groupId, userId, deviceId, mlsGroup, mlsClient, deliveryService]);
+
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || loading) return;
+
+    const text = input.trim();
+    const currentSeq = clientSeq;
+    setClientSeq(prev => prev + 1);
     setLoading(true);
 
+    // Add pending message to UI
+    const pendingId = `pending_${Date.now()}`;
+    const pendingMessage: Message = {
+      id: pendingId,
+      senderId: userId,
+      deviceId: deviceId,
+      text,
+      timestamp: Date.now(),
+      isSent: true,
+      isPending: true,
+    };
+
+    setMessages(prev => [...prev, pendingMessage]);
+    setInput('');
+
     try {
-      const text = input.trim();
-      const ciphertext = mockEncrypt(text);
-      
-      const newMessage: Message = {
-        id: 'msg_' + Date.now(),
+      // Encrypt with MLS
+      console.log('Encrypting message with MLS');
+      const mlsBytes = await mlsClient.encryptMessage(mlsGroup, text);
+
+      // Send via WebSocket
+      console.log('Sending message via WebSocket, seq:', currentSeq);
+      await deliveryService.send({
+        groupId: mlsGroup.groupId,
         senderId: userId,
         deviceId: deviceId,
-        text,
-        ciphertext,
-        timestamp: Date.now(),
-        isSent: true,
-      };
+        msgKind: 'chat' as MsgKind,
+        mlsBytes: mlsBytes,
+        clientSeq: currentSeq,
+      });
 
-      // Save to state and localStorage
-      const updatedMessages = [...messages, newMessage];
-      setMessages(updatedMessages);
-      
-      // Save to localStorage
-      const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
-      allMessages.push({ ...newMessage, groupId });
-      localStorage.setItem('messages', JSON.stringify(allMessages));
-      
-      setInput('');
-    } catch (err) {
-      console.error('Failed to send message:', err);
+      // Remove pending flag on success
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === pendingId
+            ? { ...m, isPending: false }
+            : m
+        )
+      );
+
+      console.log('Message sent successfully');
+    } catch (error) {
+      console.error('Failed to send message:', error);
+
+      // Mark as failed
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === pendingId
+            ? { ...m, isPending: false, text: `❌ ${m.text} (Failed to send)` }
+            : m
+        )
+      );
+
+      toast.error('Failed to send message. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <button onClick={onBack}>Back</button>
-        <h2>Chat</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 15px',
+        borderBottom: '1px solid #ccc',
+        background: '#fff'
+      }}>
+        <button onClick={onBack} style={{ padding: '5px 10px' }}>
+          ← Back
+        </button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>
+          Group Chat
+        </h2>
+        <button
+          onClick={() => setShowInvite(!showInvite)}
+          style={{
+            marginLeft: 'auto',
+            padding: '5px 12px',
+            background: showInvite ? '#6c757d' : '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '13px',
+          }}
+        >
+          {showInvite ? 'Hide Invite' : '+ Invite'}
+        </button>
+        <span style={{ fontSize: 12, color: '#666' }}>
+          {groupId.substring(0, 8)}...
+        </span>
       </div>
-      
-      <div style={{ 
-        height: 300, 
-        overflowY: 'auto', 
-        border: '1px solid #ccc', 
-        padding: 10,
-        marginBottom: 10,
-        background: '#fafafa'
+
+      {/* Invite section */}
+      {showInvite && (
+        <div style={{ padding: '15px', borderBottom: '1px solid #e0e0e0', background: '#f9f9f9' }}>
+          <InviteLink
+            groupId={groupId}
+            mlsGroup={mlsGroup}
+            mlsClient={mlsClient}
+            onInviteGenerated={(welcome) => {
+              console.log('Welcome message generated:', welcome.substring(0, 50) + '...');
+            }}
+          />
+        </div>
+      )}
+
+      {/* Messages */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: 15,
+        background: '#f5f5f5',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10
       }}>
         {messages.length === 0 ? (
-          <p style={{ color: '#666' }}>No messages yet</p>
+          <div style={{
+            textAlign: 'center',
+            color: '#999',
+            marginTop: 50
+          }}>
+            <p>No messages yet</p>
+            <p style={{ fontSize: 14 }}>
+              Start the conversation! 🚀
+            </p>
+          </div>
         ) : (
           messages.map(msg => (
-            <div 
-              key={msg.id} 
-              style={{ 
-                marginBottom: 8,
-                padding: '8px 12px',
-                borderRadius: 8,
-                background: msg.isSent ? '#d4edda' : '#e9ecef',
-                textAlign: msg.isSent ? 'right' : 'left',
+            <div
+              key={msg.id}
+              style={{
+                display: 'flex',
+                justifyContent: msg.isSent ? 'flex-end' : 'flex-start',
               }}
             >
-              <div style={{ fontSize: 12, color: '#666', marginBottom: 2 }}>
-                {msg.isSent ? 'You' : msg.senderId}
+              <div
+                style={{
+                  maxWidth: '70%',
+                  padding: '10px 14px',
+                  borderRadius: 12,
+                  background: msg.isSent ? '#007bff' : '#fff',
+                  color: msg.isSent ? '#fff' : '#000',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                  opacity: msg.isPending ? 0.6 : 1,
+                }}
+              >
+                {!msg.isSent && (
+                  <div style={{
+                    fontSize: 11,
+                    color: '#666',
+                    marginBottom: 4,
+                    fontWeight: 600
+                  }}>
+                    {msg.senderId === userId ? 'You' : msg.senderId.substring(0, 8)}
+                  </div>
+                )}
+                <div style={{ wordBreak: 'break-word' }}>
+                  {msg.text}
+                </div>
+                <div style={{
+                  fontSize: 10,
+                  marginTop: 4,
+                  opacity: 0.7,
+                  textAlign: 'right'
+                }}>
+                  {formatTime(msg.timestamp)}
+                  {msg.isPending && ' • Sending...'}
+                </div>
               </div>
-              <div>{msg.text}</div>
             </div>
           ))
         )}
         <div ref={messagesEndRef} />
       </div>
-      
-      <div style={{ display: 'flex', gap: 10 }}>
-        <input
-          type="text"
-          name="message"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message..."
-          style={{ flex: 1, padding: 8 }}
-          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-        />
-        <button onClick={handleSend} disabled={loading || !input.trim()}>
-          {loading ? 'Sending...' : 'Send'}
-        </button>
+
+      {/* Input */}
+      <div style={{
+        padding: 15,
+        borderTop: '1px solid #ccc',
+        background: '#fff'
+      }}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            type="text"
+            name="message"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type a message..."
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              border: '1px solid #ccc',
+              borderRadius: 20,
+              fontSize: 14,
+              outline: 'none'
+            }}
+            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+            disabled={loading}
+          />
+          <button
+            onClick={handleSend}
+            disabled={loading || !input.trim()}
+            style={{
+              padding: '10px 20px',
+              background: loading || !input.trim() ? '#ccc' : '#007bff',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 20,
+              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+              fontSize: 14,
+              fontWeight: 600
+            }}
+          >
+            {loading ? 'Sending...' : 'Send'}
+          </button>
+        </div>
+        <div style={{
+          fontSize: 11,
+          color: '#666',
+          marginTop: 8,
+          textAlign: 'center'
+        }}>
+          🔒 End-to-end encrypted with MLS
+        </div>
       </div>
     </div>
   );

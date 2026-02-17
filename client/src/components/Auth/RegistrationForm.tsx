@@ -4,6 +4,27 @@ interface RegistrationFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
 }
 
+/**
+ * Generate a mock JWT token for testing
+ * In production, this would come from the backend after WebAuthn verification
+ */
+function generateMockJWT(userId: string, deviceId: string): string {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const payload = {
+    sub: userId,
+    device_id: deviceId,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
+  };
+
+  // Base64 encode (simplified, not cryptographically secure)
+  const headerB64 = btoa(JSON.stringify(header));
+  const payloadB64 = btoa(JSON.stringify(payload));
+  const signature = 'mock_signature_' + Math.random().toString(36).substring(7);
+
+  return `${headerB64}.${payloadB64}.${signature}`;
+}
+
 const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,15 +41,19 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         // Use mock for testing
         const mockUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).slice(2);
         const mockDeviceId = 'device_' + Date.now();
-        
+
+        // Generate mock JWT token (for MVP testing)
+        const mockToken = generateMockJWT(mockUserId, mockDeviceId);
+
         // Store in localStorage
         localStorage.setItem('userId', mockUserId);
         localStorage.setItem('deviceId', mockDeviceId);
-        localStorage.setItem('userProfile', JSON.stringify({ 
-          userId: mockUserId, 
-          displayName 
+        localStorage.setItem('authToken', mockToken);
+        localStorage.setItem('userProfile', JSON.stringify({
+          userId: mockUserId,
+          displayName
         }));
-        
+
         onSuccess(mockUserId, mockDeviceId);
         return;
       }
@@ -37,14 +62,18 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
       // For E2E testing, we use the mock path
       const mockUserId = 'user_' + Date.now();
       const mockDeviceId = 'device_' + Date.now();
-      
+
+      // Generate mock JWT token (for MVP testing)
+      const mockToken = generateMockJWT(mockUserId, mockDeviceId);
+
       localStorage.setItem('userId', mockUserId);
       localStorage.setItem('deviceId', mockDeviceId);
-      localStorage.setItem('userProfile', JSON.stringify({ 
-        userId: mockUserId, 
-        displayName 
+      localStorage.setItem('authToken', mockToken);
+      localStorage.setItem('userProfile', JSON.stringify({
+        userId: mockUserId,
+        displayName
       }));
-      
+
       onSuccess(mockUserId, mockDeviceId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');

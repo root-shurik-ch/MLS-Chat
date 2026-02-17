@@ -1,3 +1,5 @@
+import type { OutgoingMessage } from '../domain/Message';
+
 export interface QueuedMessage extends OutgoingMessage {
   id: number;
 }

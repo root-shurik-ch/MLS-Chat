@@ -90,6 +90,8 @@ export class AuthServiceSupabase implements AuthService {
       mlsPublicKey: data.mls_public_key,
       mlsPrivateKeyEnc: data.mls_private_key_enc,
     };
+  }
+
   async getKeyPackage(userId: string, deviceId: string): Promise<string> {
     const response = await fetch(`${this.baseUrl}/auth/keypackage`, {
       method: 'POST',
@@ -105,3 +107,4 @@ export class AuthServiceSupabase implements AuthService {
     const data = await response.json();
     return data.key_package;
   }
+}

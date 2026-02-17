@@ -4,11 +4,15 @@ import { MlsClient } from '../../mls/index';
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase';
 import { IndexedDBStorage } from '../../utils/storage';
+import { useToastContext } from '../../contexts/ToastContext';
 
 const InviteMemberForm: React.FC<{ groupId: string }> = ({ groupId }) => {
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Toast notifications
+  const toast = useToastContext();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,9 +56,12 @@ const InviteMemberForm: React.FC<{ groupId: string }> = ({ groupId }) => {
         clientSeq: Date.now(), // simple seq
       });
 
-      alert('Member invited!');
+      toast.success('Member invited successfully!');
+      setUserId(''); // Clear input after success
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to invite member');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to invite member';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
