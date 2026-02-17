@@ -90,5 +90,18 @@ export class AuthServiceSupabase implements AuthService {
       mlsPublicKey: data.mls_public_key,
       mlsPrivateKeyEnc: data.mls_private_key_enc,
     };
+  async getKeyPackage(userId: string, deviceId: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/auth/keypackage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        device_id: deviceId,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to get key package');
+    }
+    const data = await response.json();
+    return data.key_package;
   }
-}

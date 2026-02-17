@@ -64,7 +64,6 @@ Request body:
 
 ```json
 {
-  "challenge_id": "uuid",
   "user_id": "string",
   "device_id": "string",
   "webauthn_get_response": {}
@@ -87,7 +86,26 @@ Response body:
 }
 ```
 
-## Server Validation
+## POST /auth/keypackage
+
+Request body:
+
+```json
+{
+  "user_id": "string",
+  "device_id": "string"
+}
+```
+
+Response body:
+
+```json
+{
+  "key_package": "base64"
+}
+```
+
+The server returns the MLS key package (public key) for the specified device. This is used for adding members to MLS groups.
 
 The server validates WebAuthn responses according to the [WebAuthn Level 2 specification](https://www.w3.org/TR/webauthn-2/). Key validation steps:
 

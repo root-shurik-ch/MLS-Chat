@@ -11,8 +11,12 @@ export class GroupManager {
     return group;
   }
 
-  async addMember(groupId: string, keyPackage: string): Promise<void> {
-    // Propose add, commit
+  async addMember(groupId: string, keyPackage: string): Promise<string> {
+    const group = this.groups.get(groupId);
+    if (!group) throw new Error("Group not found");
+    // TODO: Implement propose add and commit in WASM
+    // For now, dummy
+    return btoa("dummy_commit");
   }
 
   async sendMessage(groupId: string, message: string): Promise<string> {

@@ -36,5 +36,7 @@ export interface AuthService {
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
   }>;
+
+  getKeyPackage(userId: string, deviceId: string): Promise<string>;
 }
 
