@@ -1,13 +1,23 @@
 import { MlsClient, KeyPackage } from './index';
+import { IndexedDBStorage } from '../utils/storage';
 
 export class KeyPackageManager {
   private keyPackages = new Map<string, KeyPackage>();
+  private storage: IndexedDBStorage;
 
-  constructor(private mlsClient: MlsClient, private deviceId: string) {}
+  constructor(private mlsClient: MlsClient, private deviceId: string) {
+    this.storage = new IndexedDBStorage('mls-db', 'keypackages');
+  }
+
+  async init(): Promise<void> {
+    await this.storage.init();
+    await this.load();
+  }
 
   generate(): KeyPackage {
     const kp = this.mlsClient.generateKeyPackage();
     this.keyPackages.set(this.deviceId, kp);
+    this.store();
     return kp;
   }
 
@@ -16,11 +26,15 @@ export class KeyPackageManager {
   }
 
   // Store in IndexedDB
-  async store(): Promise<void> {
-    // IndexedDB logic
+  private async store(): Promise<void> {
+    const data = Object.fromEntries(this.keyPackages);
+    await this.storage.set('keypackages', data);
   }
 
-  async load(): Promise<void> {
-    // Load from IndexedDB
+  private async load(): Promise<void> {
+    const data = await this.storage.get('keypackages');
+    if (data) {
+      this.keyPackages = new Map(Object.entries(data));
+    }
   }
 }
