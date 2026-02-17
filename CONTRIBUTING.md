@@ -150,4 +150,3 @@ Before contributing, familiarize yourself with:
 - [Supabase Docs](https://supabase.com/docs)
 - [Project Specs](../spec/)
 - [Implementation Tasks](../.opencode/tasks/)</content>
-<parameter name="filePath">/Users/alexandra/min/CONTRIBUTING.md
