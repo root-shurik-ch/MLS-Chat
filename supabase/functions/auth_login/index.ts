@@ -15,7 +15,20 @@ serve(async (req: Request) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders(req) });
   }
 
-  const { origin, rpId } = getWebAuthnOriginAndRpId(req);
+  let origin: string;
+  let rpId: string;
+  try {
+    const webAuthn = getWebAuthnOriginAndRpId(req);
+    origin = webAuthn.origin;
+    rpId = webAuthn.rpId;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[auth_login] WebAuthn config error:", msg);
+    return new Response(JSON.stringify({ error: "Server configuration error" }), {
+      status: 500,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
 
   const body = await req.json();
   const { challenge_id, user_id, device_id, webauthn_get_response } = body;

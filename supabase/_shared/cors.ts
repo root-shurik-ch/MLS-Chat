@@ -67,10 +67,8 @@ export function getWebAuthnOriginAndRpId(req: Request): { origin: string; rpId: 
         `WEBAUTHN_ORIGIN is not a valid URL: "${explicitOrigin}". Fix or unset WEBAUTHN_ORIGIN in Supabase secrets.`,
       );
     }
-    return {
-      origin: explicitOrigin,
-      rpId: explicitRpId || hostname,
-    };
+    const rpId = explicitRpId || hostname;
+    return { origin: explicitOrigin, rpId };
   }
   const requestOrigin = req.headers.get("origin");
   const allowed = getAllowedOrigins();
