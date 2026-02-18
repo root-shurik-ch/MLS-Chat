@@ -61,3 +61,6 @@ client/src/mls/wasm/target/
 # Lock files for reproducible builds (keep these)
 # package-lock.json
 # yarn.lock
+
+#dev.idx
+.idx/
