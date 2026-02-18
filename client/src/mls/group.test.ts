@@ -6,7 +6,26 @@ import { MlsClient } from './index'
 // Mock MlsClient
 vi.mock('./index', () => ({
   MlsClient: vi.fn().mockImplementation(() => ({
-    createGroup: vi.fn((id) => ({ id, epoch: 0 })),
+    createGroup: vi.fn((groupId: string) => ({
+      id: groupId,
+      groupId,
+      epoch: 0,
+      treeHash: '',
+      epochAuthenticator: '',
+    })),
+    addMember: vi.fn(() => ({
+      proposals: [],
+      commit: 'dummy_commit',
+      welcome: 'dummy_welcome',
+      epochAuthenticator: 'dummy_auth',
+    })),
+    applyCommit: vi.fn((_group: { groupId: string; epoch: number }, _commit: { epochAuthenticator: string }) => ({
+      id: 'group123',
+      groupId: 'group123',
+      epoch: 1,
+      treeHash: '',
+      epochAuthenticator: 'dummy_auth',
+    })),
     encryptMessage: vi.fn(() => 'encrypted'),
     decryptMessage: vi.fn(() => 'decrypted'),
   })),
@@ -32,8 +51,9 @@ describe('GroupManager', () => {
     const groupId = 'group123'
     await groupManager.createGroup(groupId)
     const keyPackage = 'dummy'
-    const result = await groupManager.addMember(groupId, keyPackage)
-    expect(result).toBe(btoa('dummy_commit'))
+    const result = await groupManager.addMember(groupId, keyPackage as never)
+    expect(result.welcomeMessage).toBe('dummy_welcome')
+    expect(result.commit).toBeDefined()
   })
 
   it('should throw error if group not found for addMember', async () => {

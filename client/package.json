@@ -1,6 +1,6 @@
 {
   "name": "mls-chat-client",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "overrides": {
     "fsevents": "2.3.2"
