@@ -1,8 +1,13 @@
-# Working/Internal Documentation Files (Russian language, not for open-source)
+# Working/Internal Documentation (not for open-source repo)
 CODE_REVIEW_REPORT.md
 IMPROVEMENTS_COMPLETE.md
 WEBSOCKET_IMPLEMENTATION.md
 SECURITY_AUDIT_REPORT.md
+FIXES_SUMMARY.md
+DEPLOYMENT_READY.md
+docs/DEPLOY_MINIMUM_CHAT.md
+docs/DEPLOY_STEPS_NOW.md
+diagrams/architecture.md
 
 # OpenCode/Claude Agent Files
 .opencode/
