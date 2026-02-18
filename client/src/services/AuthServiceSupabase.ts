@@ -65,9 +65,15 @@ export class AuthServiceSupabase implements AuthService {
       const message = typeof data?.error === 'string' ? data.error : text || 'Registration failed';
       throw new Error(message);
     }
+    if (typeof data.auth_token !== 'string') {
+      throw new Error('Invalid registration response: missing auth_token');
+    }
+    if (!data.profile || typeof data.profile !== 'object') {
+      throw new Error('Invalid registration response: missing profile');
+    }
     return {
-      authToken: { value: data.auth_token! },
-      profile: data.profile!,
+      authToken: { value: data.auth_token },
+      profile: data.profile,
     };
   }
 
@@ -95,7 +101,24 @@ export class AuthServiceSupabase implements AuthService {
     if (!response.ok) {
       throw new Error('Login failed');
     }
-    const data = await response.json();
+    const data = (await response.json()) as {
+      auth_token?: string;
+      profile?: UserProfile;
+      mls_public_key?: string;
+      mls_private_key_enc?: string;
+    };
+    if (typeof data.auth_token !== 'string') {
+      throw new Error('Invalid login response: missing auth_token');
+    }
+    if (!data.profile || typeof data.profile !== 'object') {
+      throw new Error('Invalid login response: missing profile');
+    }
+    if (typeof data.mls_public_key !== 'string') {
+      throw new Error('Invalid login response: missing mls_public_key');
+    }
+    if (typeof data.mls_private_key_enc !== 'string') {
+      throw new Error('Invalid login response: missing mls_private_key_enc');
+    }
     return {
       authToken: { value: data.auth_token },
       profile: data.profile,
