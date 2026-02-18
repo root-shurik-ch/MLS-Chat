@@ -59,15 +59,18 @@ export function getWebAuthnOriginAndRpId(req: Request): { origin: string; rpId: 
   const explicitOrigin = Deno.env.get("WEBAUTHN_ORIGIN")?.trim();
   const explicitRpId = Deno.env.get("WEBAUTHN_RP_ID")?.trim();
   if (explicitOrigin) {
-    let rpId = explicitRpId;
-    if (!rpId) {
-      try {
-        rpId = new URL(explicitOrigin).hostname;
-      } catch {
-        return { origin: "http://localhost:3000", rpId: "localhost" };
-      }
+    let hostname: string;
+    try {
+      hostname = new URL(explicitOrigin).hostname;
+    } catch {
+      throw new Error(
+        `WEBAUTHN_ORIGIN is not a valid URL: "${explicitOrigin}". Fix or unset WEBAUTHN_ORIGIN in Supabase secrets.`,
+      );
     }
-    return { origin: explicitOrigin, rpId };
+    return {
+      origin: explicitOrigin,
+      rpId: explicitRpId || hostname,
+    };
   }
   const requestOrigin = req.headers.get("origin");
   const allowed = getAllowedOrigins();
