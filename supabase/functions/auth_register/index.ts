@@ -16,6 +16,12 @@ serve(async (req: Request) => {
   }
 
   const { origin, rpId } = getWebAuthnOriginAndRpId(req);
+  const requestOrigin = req.headers.get("origin");
+  const hasExplicitOrigin = !!Deno.env.get("WEBAUTHN_ORIGIN")?.trim();
+  console.log("[auth_register] WebAuthn: requestOrigin=" + (requestOrigin ?? "null") + " WEBAUTHN_ORIGIN=" + (hasExplicitOrigin ? "set" : "unset") + " -> origin=" + origin + " rpId=" + rpId);
+  if (!requestOrigin && !hasExplicitOrigin) {
+    console.warn("[auth_register] Set WEBAUTHN_ORIGIN (e.g. https://app.minimum.chat) and WEBAUTHN_RP_ID (e.g. app.minimum.chat) in Supabase Edge Function secrets.");
+  }
 
   const body = await req.json();
   const {

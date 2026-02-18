@@ -48,7 +48,9 @@ export function handleCorsPreflight(req: Request): Response | null {
 /**
  * Returns expectedOrigin and rpId for WebAuthn verification.
  * If WEBAUTHN_ORIGIN is set, uses it (and WEBAUTHN_RP_ID or derived hostname).
- * Otherwise uses request Origin if it is in CORS_ALLOWED_ORIGINS, so one config drives both.
+ * Otherwise uses request Origin if it is in CORS_ALLOWED_ORIGINS.
+ * Production: set WEBAUTHN_ORIGIN in Supabase secrets (e.g. https://app.minimum.chat);
+ * the Origin header may not reach Edge Functions, so fallback would use localhost and break WebAuthn.
  */
 export function getWebAuthnOriginAndRpId(req: Request): { origin: string; rpId: string } {
   const explicitOrigin = Deno.env.get("WEBAUTHN_ORIGIN")?.trim();

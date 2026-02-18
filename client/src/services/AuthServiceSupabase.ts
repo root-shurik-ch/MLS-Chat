@@ -49,13 +49,20 @@ export class AuthServiceSupabase implements AuthService {
         webauthn_create_response: input.webauthnCreateResponse,
       }),
     });
-    if (!response.ok) {
-      throw new Error('Registration failed');
+    const text = await response.text();
+    let data: { error?: string; auth_token?: string; profile?: UserProfile };
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
     }
-    const data = await response.json();
+    if (!response.ok) {
+      const message = typeof data?.error === 'string' ? data.error : text || 'Registration failed';
+      throw new Error(message);
+    }
     return {
-      authToken: { value: data.auth_token },
-      profile: data.profile,
+      authToken: { value: data.auth_token! },
+      profile: data.profile!,
     };
   }
 
