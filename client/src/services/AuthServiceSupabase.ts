@@ -60,9 +60,12 @@ export class AuthServiceSupabase implements AuthService {
       const message = typeof data?.error === 'string' ? data.error : text || 'Registration failed';
       throw new Error(message);
     }
+    if (data.auth_token == null || data.profile == null) {
+      throw new Error('Invalid server response: missing auth_token or profile');
+    }
     return {
-      authToken: { value: data.auth_token! },
-      profile: data.profile!,
+      authToken: { value: data.auth_token },
+      profile: data.profile,
     };
   }
 

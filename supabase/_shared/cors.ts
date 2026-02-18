@@ -59,10 +59,15 @@ export function getWebAuthnOriginAndRpId(req: Request): { origin: string; rpId: 
   const explicitOrigin = Deno.env.get("WEBAUTHN_ORIGIN")?.trim();
   const explicitRpId = Deno.env.get("WEBAUTHN_RP_ID")?.trim();
   if (explicitOrigin) {
-    return {
-      origin: explicitOrigin,
-      rpId: explicitRpId || new URL(explicitOrigin).hostname,
-    };
+    let rpId = explicitRpId;
+    if (!rpId) {
+      try {
+        rpId = new URL(explicitOrigin).hostname;
+      } catch {
+        return { origin: "http://localhost:3000", rpId: "localhost" };
+      }
+    }
+    return { origin: explicitOrigin, rpId };
   }
   const requestOrigin = req.headers.get("origin");
   const allowed = getAllowedOrigins();
