@@ -31,7 +31,7 @@ export class AuthServiceSupabase implements AuthService {
     displayName: string;
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
-    webauthnCreateResponse: PublicKeyCredential;
+    webauthnCreateResponse: Record<string, unknown>;
   }): Promise<{
     authToken: { value: string; expiresAt?: number };
     profile: UserProfile;
@@ -63,7 +63,7 @@ export class AuthServiceSupabase implements AuthService {
     challengeId: string;
     userId: string;
     deviceId: string;
-    webauthnGetResponse: PublicKeyCredential;
+    webauthnGetResponse: Record<string, unknown>;
   }): Promise<{
     authToken: { value: string; expiresAt?: number };
     profile: UserProfile;

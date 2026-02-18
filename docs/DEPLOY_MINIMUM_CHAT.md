@@ -71,15 +71,21 @@ supabase db push
 
 ### 1.3 Edge Functions
 
-Для WebSocket (ds_send) обязательно использовать в коде **Deno.serve**, а не `serve` из std — иначе шлюз возвращает 502. При деплое функции, которая не проверяет JWT в заголовке (браузер не шлёт заголовки при upgrade), укажи **--no-verify-jwt**:  
-`supabase functions deploy ds_send --no-verify-jwt --project-ref <ref>`.
-
+**Команда деплоя (каноническая):**
 ```bash
-supabase functions deploy ds_send --no-verify-jwt
-supabase functions deploy auth_challenge
-supabase functions deploy auth_register
-supabase functions deploy auth_login
-supabase functions deploy auth_keypackage
+npx supabase@latest functions deploy --use-api --no-verify-jwt
+```
+Деплоит все функции без проверки JWT (нужно для ds_send WebSocket, т.к. браузер не шлёт заголовки при upgrade).
+
+Для WebSocket (ds_send) в коде обязательно **Deno.serve**, а не `serve` из std — иначе шлюз возвращает 502.
+
+По одной функции (если нужно):
+```bash
+npx supabase@latest functions deploy ds_send --use-api --no-verify-jwt
+npx supabase@latest functions deploy auth_challenge --use-api
+npx supabase@latest functions deploy auth_register --use-api
+npx supabase@latest functions deploy auth_login --use-api
+npx supabase@latest functions deploy auth_keypackage --use-api
 ```
 
 URL WebSocket для клиента будет:
@@ -247,7 +253,7 @@ AS отвечает за регистрацию/логин (WebAuthn, челле
 1. **На самом Cloudflare Pages** — в Build command перед `npm run build` установить Rust и wasm-pack (curl rustup, `wasm-pack build` в `client/src/mls/wasm`). Минусы: сборка 10–20 минут, риск таймаута, в образе Pages нет Rust по умолчанию.
 2. **В отдельном CI (рекомендуется)** — например GitHub Actions: при пуше в `main` job с Rust устанавливает wasm-pack, собирает WASM, коммитит обновлённый `pkg/` в репо (или выкладывает артефакт); Pages при следующем деплое подхватывает уже готовый pkg. Так Rust не нужен на Pages, обновление wasm автоматическое при изменении кода в `client/src/mls/wasm/`.
 
-Для первой версии достаточно коммитить `pkg/` вручную после локального `wasm-pack build`. Автоматизацию в Actions можно добавить позже.
+**Реализовано:** workflow `.github/workflows/build-wasm.yml` при пуше в `main` (если менялись `client/src/mls/wasm/**`, `client/package.json` или этот workflow) собирает WASM, при изменении `pkg/` коммитит и пушит обновление, затем проверяет сборку клиента (`npm run build`). Запуск вручную: **Actions → Build WASM and client → Run workflow**.
 
 ---
 
@@ -311,6 +317,31 @@ AS отвечает за регистрацию/логин (WebAuthn, челле
 
 ---
 
+## Версионность и GitHub Releases
+
+**Версия приложения** берётся из `client/package.json` (поле `version`) и подставляется в сборку (Vite `define`). В интерфейсе отображается внизу экранов Auth и Groups (например, «v1.0.0»).
+
+**Релизы в GitHub:**
+
+1. Обновить версию в `client/package.json` (например, `1.0.0`).
+2. Закоммитить, запушеть в `main`.
+3. Создать тег и запушить:  
+   `git tag v1.0.0 && git push origin v1.0.0`
+4. Workflow **Release** (`.github/workflows/release.yml`) запустится: соберёт WASM и клиент, создаст **GitHub Release** с тегом `v1.0.0` и приложит архив `dist.zip` (готовый `client/dist/`).
+
+Релиз нужен для истории версий, скачивания артефактов и (опционально) для деплоя в прод только с тегов.
+
+**Логика на Cloudflare — когда что менять:**
+
+- **Сейчас (рекомендуется):** Cloudflare Pages по-прежнему собирает проект из ветки **main**. При пуше в `main` выполняется обычная сборка (Build command: `cd client && npm ci && npm run build`). Версия в приложении — из `package.json` на момент этой сборки. Менять настройки Cloudflare не обязательно: теги и Releases используются для артефактов и истории, а прод продолжает деплоиться с `main`.
+- **Если нужен прод только с релизов:** тогда логику Cloudflare меняют одним из способов:
+  - **Вариант A:** В Pages оставить сборку из Git, но в качестве **Production branch** указать ветку, которую обновляете только при релизе (например, `release`): перед релизом делаете `git checkout release && git merge main && git push`, затем тегируете с этой ветки. Тогда «продакшен» в Pages обновляется только при таких мержах.
+  - **Вариант B:** Деплой в Pages из CI: в workflow после создания Release добавить шаг с **Wrangler** (Direct Upload), который заливает собранный `client/dist` в проект Pages. Тогда в Cloudflare проект настраивается как **Direct Upload**, а не «Connect to Git», и прод обновляется только при запуске этого шага (по тегу).
+
+Для первой версии достаточно текущей схемы: деплой с `main`, версия из `package.json`, релизы в GitHub для артефактов и тегов.
+
+---
+
 ## Краткая шпаргалка
 
 | Что | Где |
@@ -322,5 +353,7 @@ AS отвечает за регистрацию/логин (WebAuthn, челле
 
 Переменные для сборки фронта (в Cloudflare Pages):  
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_WS_URL`.
+
+Версия приложения: `client/package.json` → отображается в UI. Релиз: тег `v*` → workflow **Release** → GitHub Releases с архивом `dist.zip`.
 
 После выполнения шагов первая версия будет доступна по **https://app.minimum.chat** (или https://minimum.chat, в зависимости от выбранного custom domain).

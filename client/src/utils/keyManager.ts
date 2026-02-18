@@ -70,17 +70,32 @@ export class KeyManager {
     deviceId: string,
     credentialId: string
   ): Promise<void> {
-    // Get PRF output from WebAuthn
     const prfOutput = await getPrfOutput(credentialId, userId);
+    await this.decryptAndStoreServerKeyWithPrf(
+      encryptedKey,
+      userId,
+      deviceId,
+      prfOutput
+    );
+  }
+
+  /**
+   * Same as decryptAndStoreServerKey but uses pre-obtained PRF output
+   * (e.g. from authenticatePasskeyDiscoverable) to avoid second auth prompt.
+   */
+  async decryptAndStoreServerKeyWithPrf(
+    encryptedKey: string,
+    userId: string,
+    deviceId: string,
+    prfOutput: Uint8Array,
+    mlsPublicKeyBytes?: Uint8Array
+  ): Promise<void> {
     const kEnc = await deriveKEnc(prfOutput);
-    
-    // Decrypt the MLS private key
     const mlsPrivateKey = await decryptMlsPrivateKey(encryptedKey, kEnc, userId);
-    
-    // We need the MLS public key - for now, derive from private (mock)
-    // In real implementation, server should return mlsPublicKey
-    const mlsPublicKey = await this.derivePublicKey(mlsPrivateKey);
-    
+    const mlsPublicKey =
+      mlsPublicKeyBytes && mlsPublicKeyBytes.length > 0
+        ? mlsPublicKeyBytes
+        : await this.derivePublicKey(mlsPrivateKey);
     await this.storeKeys(userId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
   }
 

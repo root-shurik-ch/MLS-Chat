@@ -1,32 +1,20 @@
 import React, { useState } from 'react';
+import {
+  authenticatePasskeyDiscoverable,
+  serializeGetResponse,
+  isWebAuthnSupported,
+  isPRFSupported,
+} from '../../utils/webauthn';
+import { generateDeviceId, decodeBase64Url } from '../../utils/crypto';
+import { KeyManager } from '../../utils/keyManager';
+import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 
 interface LoginFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
 }
 
-/**
- * Generate a mock JWT token for testing
- * In production, this would come from the backend after WebAuthn verification
- */
-function generateMockJWT(userId: string, deviceId: string): string {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = {
-    sub: userId,
-    device_id: deviceId,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
-  };
-
-  // Base64 encode (simplified, not cryptographically secure)
-  const headerB64 = btoa(JSON.stringify(header));
-  const payloadB64 = btoa(JSON.stringify(payload));
-  const signature = 'mock_signature_' + Math.random().toString(36).substring(7);
-
-  return `${headerB64}.${payloadB64}.${signature}`;
-}
-
 const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
-  const [userId, setUserId] = useState('');
+  const [userIdInput, setUserIdInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,28 +23,71 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
     setLoading(true);
     setError(null);
 
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const baseUrl =
+      supabaseUrl && !supabaseUrl.includes('undefined')
+        ? supabaseUrl.replace(/\/$/, '') + '/functions/v1'
+        : '';
+
     try {
-      // Mock login for testing
-      const savedUserId = localStorage.getItem('userId');
-      const savedDeviceId = localStorage.getItem('deviceId');
-
-      if (savedUserId && savedDeviceId) {
-        // Check if we have a valid auth token
-        let authToken = localStorage.getItem('authToken');
-
-        // If no token or expired, generate new one
-        if (!authToken) {
-          authToken = generateMockJWT(savedUserId, savedDeviceId);
-          localStorage.setItem('authToken', authToken);
-        } else {
-          // In production, you'd verify token expiration here
-          // For now, we trust the stored token
-        }
-
-        onSuccess(savedUserId, savedDeviceId);
-      } else {
-        setError('No registered user found');
+      if (!baseUrl) {
+        setError('Server not configured. Set VITE_SUPABASE_URL in environment.');
+        return;
       }
+      if (!(await isWebAuthnSupported())) {
+        setError('This browser does not support passkeys. Use a modern browser.');
+        return;
+      }
+      if (!(await isPRFSupported())) {
+        setError('Passkey with PRF (e.g. biometrics) is required. Use a supported device.');
+        return;
+      }
+
+      const userId = userIdInput.trim();
+      if (!userId) {
+        setError('Enter your User ID to sign in with passkey');
+        return;
+      }
+
+      const deviceId = generateDeviceId();
+      const authService = new AuthServiceSupabase(baseUrl);
+      const keyManager = new KeyManager();
+      await keyManager.init();
+
+      const { challengeId, challenge } = await authService.getChallenge('login');
+
+      const { userId: resolvedUserId, credentialId, prfOutput, credential } =
+        await authenticatePasskeyDiscoverable(challenge, userId);
+
+      const webauthnGetResponse = serializeGetResponse(credential);
+
+      const { authToken, profile, mlsPublicKey, mlsPrivateKeyEnc } =
+        await authService.login({
+          challengeId,
+          userId: resolvedUserId,
+          deviceId,
+          webauthnGetResponse,
+        });
+
+      const mlsPublicKeyBytes = decodeBase64Url(mlsPublicKey);
+      await keyManager.decryptAndStoreServerKeyWithPrf(
+        mlsPrivateKeyEnc,
+        resolvedUserId,
+        deviceId,
+        prfOutput,
+        mlsPublicKeyBytes
+      );
+
+      localStorage.setItem('userId', resolvedUserId);
+      localStorage.setItem('deviceId', deviceId);
+      localStorage.setItem('authToken', authToken.value);
+      localStorage.setItem('userProfile', JSON.stringify({
+        userId: profile.userId,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+      }));
+
+      onSuccess(resolvedUserId, deviceId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -69,13 +100,13 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
       <h2>Login</h2>
       <input
         type="text"
-        placeholder="User ID (for testing, leave empty)"
-        value={userId}
-        onChange={(e) => setUserId(e.target.value)}
+        placeholder="User ID (from registration)"
+        value={userIdInput}
+        onChange={(e) => setUserIdInput(e.target.value)}
         style={{ width: '100%', padding: 8, marginBottom: 10 }}
       />
       <button type="submit" disabled={loading}>
-        {loading ? 'Logging in...' : 'Login'}
+        {loading ? 'Signing in...' : 'Sign in with passkey'}
       </button>
       {error && <p style={{ color: 'red' }}>{error}</p>}
     </form>

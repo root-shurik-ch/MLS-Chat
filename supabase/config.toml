@@ -1,0 +1,18 @@
+# Minimal config for Edge Functions deploy.
+# Entrypoints are relative to this file (supabase/).
+project_id = "min"
+
+[functions.ds_send]
+entrypoint = "./functions/ds_send/index.ts"
+
+[functions.auth_challenge]
+entrypoint = "./functions/auth_challenge/index.ts"
+
+[functions.auth_register]
+entrypoint = "./functions/auth_register/index.ts"
+
+[functions.auth_login]
+entrypoint = "./functions/auth_login/index.ts"
+
+[functions.auth_keypackage]
+entrypoint = "./functions/auth_keypackage/index.ts"

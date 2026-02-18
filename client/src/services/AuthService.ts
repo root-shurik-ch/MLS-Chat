@@ -19,7 +19,7 @@ export interface AuthService {
     displayName: string;
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
-    webauthnCreateResponse: PublicKeyCredential;
+    webauthnCreateResponse: Record<string, unknown>;
   }): Promise<{
     authToken: AuthToken;
     profile: UserProfile;
@@ -29,7 +29,7 @@ export interface AuthService {
     challengeId: string;
     userId: string;
     deviceId: string;
-    webauthnGetResponse: PublicKeyCredential;
+    webauthnGetResponse: Record<string, unknown>;
   }): Promise<{
     authToken: AuthToken;
     profile: UserProfile;

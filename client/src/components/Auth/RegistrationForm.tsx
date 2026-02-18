@@ -1,28 +1,27 @@
 import React, { useState } from 'react';
+import {
+  createPasskey,
+  authenticatePasskey,
+  serializeCreationResult,
+  isWebAuthnSupported,
+  isPRFSupported,
+} from '../../utils/webauthn';
+import {
+  generateDeviceId,
+  generateMlsKeys,
+  encryptMlsPrivateKey,
+  deriveKEnc,
+  encodeBase64Url,
+} from '../../utils/crypto';
+import { KeyManager } from '../../utils/keyManager';
+import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 
 interface RegistrationFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
 }
 
-/**
- * Generate a mock JWT token for testing
- * In production, this would come from the backend after WebAuthn verification
- */
-function generateMockJWT(userId: string, deviceId: string): string {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = {
-    sub: userId,
-    device_id: deviceId,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
-  };
-
-  // Base64 encode (simplified, not cryptographically secure)
-  const headerB64 = btoa(JSON.stringify(header));
-  const payloadB64 = btoa(JSON.stringify(payload));
-  const signature = 'mock_signature_' + Math.random().toString(36).substring(7);
-
-  return `${headerB64}.${payloadB64}.${signature}`;
+function generateUserId(): string {
+  return 'user_' + encodeBase64Url(crypto.getRandomValues(new Uint8Array(16)));
 }
 
 const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
@@ -35,46 +34,76 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
     setLoading(true);
     setError(null);
 
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const baseUrl =
+      supabaseUrl && !supabaseUrl.includes('undefined')
+        ? supabaseUrl.replace(/\/$/, '') + '/functions/v1'
+        : '';
+
     try {
-      // Check for WebAuthn support
-      if (!navigator.credentials) {
-        // Use mock for testing
-        const mockUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-        const mockDeviceId = 'device_' + Date.now();
-
-        // Generate mock JWT token (for MVP testing)
-        const mockToken = generateMockJWT(mockUserId, mockDeviceId);
-
-        // Store in localStorage
-        localStorage.setItem('userId', mockUserId);
-        localStorage.setItem('deviceId', mockDeviceId);
-        localStorage.setItem('authToken', mockToken);
-        localStorage.setItem('userProfile', JSON.stringify({
-          userId: mockUserId,
-          displayName
-        }));
-
-        onSuccess(mockUserId, mockDeviceId);
+      if (!baseUrl) {
+        setError('Server not configured. Set VITE_SUPABASE_URL in environment.');
+        return;
+      }
+      if (!(await isWebAuthnSupported())) {
+        setError('This browser does not support passkeys. Use a modern browser.');
+        return;
+      }
+      if (!(await isPRFSupported())) {
+        setError('Passkey with PRF (e.g. biometrics) is required. Use a supported device.');
         return;
       }
 
-      // Real WebAuthn flow would go here
-      // For E2E testing, we use the mock path
-      const mockUserId = 'user_' + Date.now();
-      const mockDeviceId = 'device_' + Date.now();
+      const userId = generateUserId();
+      const deviceId = generateDeviceId();
+      const authService = new AuthServiceSupabase(baseUrl);
+      const keyManager = new KeyManager();
+      await keyManager.init();
 
-      // Generate mock JWT token (for MVP testing)
-      const mockToken = generateMockJWT(mockUserId, mockDeviceId);
+      const { challengeId, challenge } = await authService.getChallenge('register');
 
-      localStorage.setItem('userId', mockUserId);
-      localStorage.setItem('deviceId', mockDeviceId);
-      localStorage.setItem('authToken', mockToken);
+      const createResult = await createPasskey(userId, challenge, displayName);
+
+      const { challenge: loginChallenge } = await authService.getChallenge('login');
+      const authResult = await authenticatePasskey(
+        createResult.credentialId,
+        loginChallenge,
+        userId
+      );
+
+      const prfOutput = authResult.prfOutput;
+      const kEnc = await deriveKEnc(prfOutput);
+      const { publicKey: mlsPublicKey, privateKey: mlsPrivateKey } = await generateMlsKeys();
+      const mlsPrivateKeyEnc = await encryptMlsPrivateKey(mlsPrivateKey, kEnc, userId);
+
+      const webauthnCreateResponse = serializeCreationResult({
+        credentialId: createResult.credentialId,
+        attestationObject: createResult.attestationObject,
+        clientDataJSON: createResult.clientDataJSON,
+      });
+
+      const { authToken, profile } = await authService.register({
+        challengeId,
+        userId,
+        deviceId,
+        displayName,
+        mlsPublicKey: encodeBase64Url(mlsPublicKey),
+        mlsPrivateKeyEnc,
+        webauthnCreateResponse,
+      });
+
+      await keyManager.storeKeys(userId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
+
+      localStorage.setItem('userId', userId);
+      localStorage.setItem('deviceId', deviceId);
+      localStorage.setItem('authToken', authToken.value);
       localStorage.setItem('userProfile', JSON.stringify({
-        userId: mockUserId,
-        displayName
+        userId: profile.userId,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
       }));
 
-      onSuccess(mockUserId, mockDeviceId);
+      onSuccess(userId, deviceId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {

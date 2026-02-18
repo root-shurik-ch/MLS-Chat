@@ -242,3 +242,123 @@ export async function isPRFSupported(): Promise<boolean> {
   // The actual PRF support will be checked during credential creation/authentication
   return available;
 }
+
+/**
+ * Serialize PublicKeyCredential (creation) for JSON send to server.
+ */
+export function serializeCreationResponse(credential: PublicKeyCredential): Record<string, unknown> {
+  const response = credential.response as AuthenticatorAttestationResponse;
+  return {
+    id: credential.id,
+    rawId: encodeBase64Url(new Uint8Array(credential.rawId)),
+    type: credential.type,
+    response: {
+      clientDataJSON: encodeBase64Url(new Uint8Array(response.clientDataJSON)),
+      attestationObject: encodeBase64Url(new Uint8Array(response.attestationObject)),
+    },
+  };
+}
+
+/**
+ * Serialize creation result (from createPasskey) for JSON send to server.
+ */
+export function serializeCreationResult(result: {
+  credentialId: string;
+  attestationObject: string;
+  clientDataJSON: string;
+}): Record<string, unknown> {
+  return {
+    id: result.credentialId,
+    rawId: result.credentialId,
+    type: 'public-key',
+    response: {
+      clientDataJSON: result.clientDataJSON,
+      attestationObject: result.attestationObject,
+    },
+  };
+}
+
+/**
+ * Serialize PublicKeyCredential (get) for JSON send to server.
+ */
+export function serializeGetResponse(credential: PublicKeyCredential): Record<string, unknown> {
+  const response = credential.response as AuthenticatorAssertionResponse;
+  const out: Record<string, unknown> = {
+    id: credential.id,
+    rawId: encodeBase64Url(new Uint8Array(credential.rawId)),
+    type: credential.type,
+    response: {
+      clientDataJSON: encodeBase64Url(new Uint8Array(response.clientDataJSON)),
+      authenticatorData: encodeBase64Url(new Uint8Array(response.authenticatorData)),
+      signature: encodeBase64Url(new Uint8Array(response.signature)),
+    },
+  };
+  if (response.userHandle && response.userHandle.byteLength > 0) {
+    (out.response as Record<string, unknown>).userHandle = encodeBase64Url(
+      new Uint8Array(response.userHandle)
+    );
+  }
+  return out;
+}
+
+/**
+ * Authenticate with resident/discoverable key (no credentialId needed).
+ * Browser shows passkey picker.
+ * userId is required for PRF salt (same as at registration) to derive kEnc for key decryption.
+ */
+export async function authenticatePasskeyDiscoverable(
+  challenge: string,
+  userId: string
+): Promise<{
+  userId: string;
+  credentialId: string;
+  prfOutput: Uint8Array;
+  credential: PublicKeyCredential;
+}> {
+  const rpId = window.location.hostname;
+  const challengeBytes = decodeBase64Url(challenge);
+  const userIdBytes = new TextEncoder().encode(userId);
+
+  const publicKey: PublicKeyCredentialRequestOptions = {
+    rpId,
+    challenge: challengeBytes,
+    timeout: 60000,
+    userVerification: 'required',
+    allowCredentials: [],
+    extensions: {
+      prf: {
+        eval: {
+          first: userIdBytes,
+        },
+      },
+    },
+  };
+
+  const credential = (await navigator.credentials.get({
+    publicKey,
+  })) as PublicKeyCredential | null;
+
+  if (!credential) {
+    throw new Error('Authentication failed or cancelled');
+  }
+
+  const response = credential.response as AuthenticatorAssertionResponse;
+  const prfExtension = credential.getClientExtensionResults()?.prf;
+  if (!prfExtension?.results?.first) {
+    throw new Error('PRF extension required for login');
+  }
+
+  const prfOutput = new Uint8Array(prfExtension.results.first);
+  const credentialId = encodeBase64Url(new Uint8Array(credential.rawId));
+  const userHandle = response.userHandle && response.userHandle.byteLength > 0
+    ? new TextDecoder().decode(response.userHandle)
+    : '';
+  const resolvedUserId = userHandle || userId;
+
+  return {
+    userId: resolvedUserId,
+    credentialId,
+    prfOutput,
+    credential,
+  };
+}

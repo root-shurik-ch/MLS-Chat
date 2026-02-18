@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import RegistrationForm from './components/Auth/RegistrationForm';
 import LoginForm from './components/Auth/LoginForm';
 import GroupManagement from './components/Group/GroupManagement';
@@ -71,18 +71,8 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    // Check for existing session
-    const savedUserId = localStorage.getItem('userId');
-    if (savedUserId) {
-      setUserId(savedUserId);
-      setDeviceId(localStorage.getItem('deviceId'));
-      setView('groups');
-
-      // Initialize services for existing session
-      initializeServices(savedUserId, localStorage.getItem('deviceId')!);
-    }
-  }, [initializeServices]);
+  // Do not auto-redirect to groups: show auth first so Register/Login always run (passkey requested).
+  // User with saved session can click "Continue with saved session" to restore.
 
   const handleAuthSuccess = async (userId: string, deviceId: string) => {
     setUserId(userId);
@@ -160,11 +150,36 @@ const App: React.FC = () => {
   };
 
   if (view === 'auth') {
+    const savedUserId = typeof window !== 'undefined' ? localStorage.getItem('userId') : null;
+    const savedDeviceId = typeof window !== 'undefined' ? localStorage.getItem('deviceId') : null;
+    const hasSavedSession = !!(savedUserId && savedDeviceId);
+
+    const handleContinueSession = () => {
+      if (savedUserId && savedDeviceId) {
+        setUserId(savedUserId);
+        setDeviceId(savedDeviceId);
+        setView('groups');
+        initializeServices(savedUserId, savedDeviceId);
+      }
+    };
+
     return (
       <div style={{ maxWidth: 400, margin: '0 auto', padding: 20 }}>
         <h1>MLS Chat</h1>
+        {hasSavedSession && (
+          <div style={{ marginBottom: 16, padding: 12, background: '#e7f3ff', borderRadius: 8 }}>
+            <p style={{ margin: '0 0 8px 0' }}>You have a saved session.</p>
+            <button type="button" onClick={handleContinueSession} style={{ marginRight: 8 }}>
+              Continue to Groups
+            </button>
+            <button type="button" onClick={handleLogout}>
+              Log out and Register / Sign in again
+            </button>
+          </div>
+        )}
         <RegistrationForm onSuccess={handleAuthSuccess} />
         <LoginForm onSuccess={handleAuthSuccess} />
+        <p style={{ marginTop: 24, fontSize: 12, color: '#888' }}>v{__APP_VERSION__}</p>
       </div>
     );
   }
@@ -189,6 +204,7 @@ const App: React.FC = () => {
           <button onClick={handleLogout} style={{ marginTop: 20 }}>
             Logout
           </button>
+          <p style={{ marginTop: 16, fontSize: 12, color: '#888' }}>v{__APP_VERSION__}</p>
         </div>
       </>
     );
