@@ -13,7 +13,7 @@ export class AuthServiceSupabase implements AuthService {
     challenge: string;
     ttl: number;
   }> {
-    const response = await fetch(`${this.baseUrl}/auth/challenge`, {
+    const response = await fetch(`${this.baseUrl}/auth_challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
@@ -36,7 +36,7 @@ export class AuthServiceSupabase implements AuthService {
     authToken: { value: string; expiresAt?: number };
     profile: UserProfile;
   }> {
-    const response = await fetch(`${this.baseUrl}/auth/register`, {
+    const response = await fetch(`${this.baseUrl}/auth_register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -70,7 +70,7 @@ export class AuthServiceSupabase implements AuthService {
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
   }> {
-    const response = await fetch(`${this.baseUrl}/auth/login`, {
+    const response = await fetch(`${this.baseUrl}/auth_login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -93,7 +93,7 @@ export class AuthServiceSupabase implements AuthService {
   }
 
   async getKeyPackage(userId: string, deviceId: string): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/auth/keypackage`, {
+    const response = await fetch(`${this.baseUrl}/auth_keypackage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
