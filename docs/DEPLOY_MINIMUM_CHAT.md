@@ -251,21 +251,6 @@ AS отвечает за регистрацию/логин (WebAuthn, челле
 
 ## Отладка WebSocket (ds_send)
 
-### Проверка из терминала
-
-Скрипт отправляет WebSocket handshake и выводит статус и заголовки ответа (ожидается **HTTP 101** при успехе):
-
-```bash
-chmod +x docs/test_ws_upgrade.sh
-./docs/test_ws_upgrade.sh
-```
-
-Можно передать свой URL: `./docs/test_ws_upgrade.sh https://<project>.supabase.co/functions/v1/ds_send`.
-
-- **101** — апгрейд прошёл, с браузером проблема может быть в CORS или в коде клиента.
-- **400** — сервер не увидел `Upgrade: websocket` (проверить логи Edge Function).
-- **403** — часто ограничение по Origin (добавить домен в `CORS_ALLOWED_ORIGINS` в Supabase Secrets).
-
 ### Логи Edge Function
 
 В **Supabase Dashboard → Edge Functions → ds_send → Logs** смотреть строки:
@@ -285,13 +270,7 @@ chmod +x docs/test_ws_upgrade.sh
 5. Клик по запросу к `ds_send`:
    - **Headers**: смотреть **Request URL**, **Status Code** (должен быть 101), **Request Headers** (есть ли `Upgrade: websocket`, какой `Origin`).
    - **Response Headers**: есть ли `Access-Control-Allow-Origin` и совпадает ли с вашим origin.
-6. Вкладка **Console**: ошибки вида «WebSocket connection failed» или «bad response» означают, что сервер вернул не 101 (например 400/403) — тогда смотреть в Network статус и в Supabase логи.
-
-**Проверка в консоли (на странице приложения):** приложение в dev/prod выставляет в `window` отладочные переменные. В Console выполните:
-- `__ds_ws` — текущий экземпляр WebSocket (или последний созданный); `__ds_ws.readyState`: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED.
-- `__ds_last_close` — объект последнего закрытия: `{ code, reason, wasClean }`. Код 1006 обычно означает, что соединение не открылось (сервер вернул не 101).
-
-Если видите в инспекторе только конструктор `WebSocket` (CONNECTING: 0, OPEN: 1, …) — это сам класс, а не ваше соединение. Смотрите **Network → WS** (запрос к `ds_send`) и в консоли — `__ds_ws` / `__ds_last_close`.
+6. Вкладка **Console**: ошибки вида «WebSocket connection failed» или «bad response» означают, что сервер вернул не 101 (например 400/403) — смотреть в Network статус и в Supabase логи.
 
 **Частые причины «bad response»:**
 

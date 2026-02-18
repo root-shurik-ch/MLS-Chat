@@ -18,10 +18,15 @@ client/test-results/
 client/playwright-report/
 client/e2e/.auth/
 
+# Local test/debug scripts (public repo: do not commit)
+docs/test_*.sh
+**/test_*.sh
+
 # Environment files
 .env
 .env.local
 .env.*.local
+.env.production
 *.env
 
 # OS files
