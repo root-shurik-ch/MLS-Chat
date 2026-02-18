@@ -47,6 +47,13 @@ serve(async (req: Request) => {
     webauthn_create_response,
   } = body;
 
+  if (!challenge_id) {
+    return new Response(JSON.stringify({ error: "Missing challenge_id" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+
   // Get challenge from db
   const { data: challengeData, error: challengeError } = await supabase
     .from("challenges")

@@ -21,7 +21,12 @@ export class AuthServiceSupabase implements AuthService {
     if (!response.ok) {
       throw new Error('Failed to get challenge');
     }
-    return response.json();
+    const data = await response.json() as { challenge_id: string; challenge: string; ttl: number };
+    return {
+      challengeId: data.challenge_id,
+      challenge: data.challenge,
+      ttl: data.ttl,
+    };
   }
 
   async register(input: {
@@ -60,12 +65,9 @@ export class AuthServiceSupabase implements AuthService {
       const message = typeof data?.error === 'string' ? data.error : text || 'Registration failed';
       throw new Error(message);
     }
-    if (data.auth_token == null || data.profile == null) {
-      throw new Error('Invalid server response: missing auth_token or profile');
-    }
     return {
-      authToken: { value: data.auth_token },
-      profile: data.profile,
+      authToken: { value: data.auth_token! },
+      profile: data.profile!,
     };
   }
 
