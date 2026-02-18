@@ -54,6 +54,50 @@ serve(async (req: Request) => {
     });
   }
 
+  // Validate WebAuthn response shape before calling library (avoids "reading 'toString' of undefined" inside lib)
+  const r = webauthn_create_response;
+  if (!r || typeof r !== "object") {
+    return new Response(JSON.stringify({ error: "Missing or invalid webauthn_create_response" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  const id = r.id;
+  const rawId = r.rawId;
+  const res = r.response;
+  if (typeof id !== "string" || id.trim() === "") {
+    return new Response(JSON.stringify({ error: "webauthn_create_response.id must be a non-empty string" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  if (!res || typeof res !== "object") {
+    return new Response(JSON.stringify({ error: "webauthn_create_response.response is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  const clientDataJSON = res.clientDataJSON;
+  const attestationObject = res.attestationObject;
+  if (typeof clientDataJSON !== "string" || clientDataJSON.trim() === "") {
+    return new Response(JSON.stringify({ error: "webauthn_create_response.response.clientDataJSON must be a non-empty string" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  if (typeof attestationObject !== "string" || attestationObject.trim() === "") {
+    return new Response(JSON.stringify({ error: "webauthn_create_response.response.attestationObject must be a non-empty string" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  const normalizedResponse = {
+    id,
+    rawId: typeof rawId === "string" ? rawId : id,
+    type: r.type === "public-key" ? "public-key" : "public-key",
+    response: { clientDataJSON, attestationObject },
+  };
+
   // Get challenge from db
   const { data: challengeData, error: challengeError } = await supabase
     .from("challenges")
@@ -77,14 +121,32 @@ serve(async (req: Request) => {
     });
   }
 
-  // Decode challenge
-  const expectedChallenge = Uint8Array.from(atob(challengeData.challenge), c => c.charCodeAt(0));
+  const challengeB64 = challengeData.challenge;
+  if (typeof challengeB64 !== "string" || challengeB64.trim() === "") {
+    console.error("[auth_register] Invalid challenge in DB: not a non-empty string");
+    return new Response(JSON.stringify({ error: "Invalid challenge data" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+
+  // Decode challenge (stored as base64)
+  let expectedChallenge: Uint8Array;
+  try {
+    expectedChallenge = Uint8Array.from(atob(challengeB64), c => c.charCodeAt(0));
+  } catch (e) {
+    console.error("[auth_register] Challenge decode error:", e);
+    return new Response(JSON.stringify({ error: "Invalid challenge encoding" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
 
   // Validate WebAuthn response
   let verification;
   try {
     verification = await verifyRegistrationResponse({
-      response: webauthn_create_response,
+      response: normalizedResponse,
       expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpId,
