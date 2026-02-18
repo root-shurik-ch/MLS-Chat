@@ -31,14 +31,11 @@ function isAllowedOrigin(origin: string | null, allowed: string[]): boolean {
 export function corsHeaders(req: Request): Record<string, string> {
   const allowed = getAllowedOrigins();
   const origin = getOrigin(req);
-  const headers: Record<string, string> = {
+  return {
+    "Access-Control-Allow-Origin": isAllowedOrigin(origin, allowed) ? origin! : allowed[0],
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   };
-  if (isAllowedOrigin(origin, allowed) && origin) {
-    headers["Access-Control-Allow-Origin"] = origin;
-  }
-  return headers;
 }
 
 export function handleCorsPreflight(req: Request): Response | null {
@@ -46,4 +43,31 @@ export function handleCorsPreflight(req: Request): Response | null {
     return new Response("ok", { status: 200, headers: corsHeaders(req) });
   }
   return null;
+}
+
+/**
+ * Returns expectedOrigin and rpId for WebAuthn verification.
+ * If WEBAUTHN_ORIGIN is set, uses it (and WEBAUTHN_RP_ID or derived hostname).
+ * Otherwise uses request Origin if it is in CORS_ALLOWED_ORIGINS, so one config drives both.
+ */
+export function getWebAuthnOriginAndRpId(req: Request): { origin: string; rpId: string } {
+  const explicitOrigin = Deno.env.get("WEBAUTHN_ORIGIN")?.trim();
+  const explicitRpId = Deno.env.get("WEBAUTHN_RP_ID")?.trim();
+  if (explicitOrigin) {
+    return {
+      origin: explicitOrigin,
+      rpId: explicitRpId || new URL(explicitOrigin).hostname,
+    };
+  }
+  const requestOrigin = req.headers.get("origin");
+  const allowed = getAllowedOrigins();
+  if (requestOrigin && allowed.includes(requestOrigin)) {
+    try {
+      const rpId = new URL(requestOrigin).hostname;
+      return { origin: requestOrigin, rpId };
+    } catch {
+      // fallback below
+    }
+  }
+  return { origin: "http://localhost:3000", rpId: "localhost" };
 }

@@ -1,14 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifyRegistrationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
-import { corsHeaders, handleCorsPreflight } from "../../_shared/cors.ts";
+import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-const rpId = Deno.env.get("WEBAUTHN_RP_ID") || "localhost";
-const origin = Deno.env.get("WEBAUTHN_ORIGIN") || "http://localhost:3000";
 
 serve(async (req: Request) => {
   const preflight = handleCorsPreflight(req);
@@ -17,6 +14,8 @@ serve(async (req: Request) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders(req) });
   }
+
+  const { origin, rpId } = getWebAuthnOriginAndRpId(req);
 
   const body = await req.json();
   const {
