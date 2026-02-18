@@ -37,6 +37,7 @@ serve(async (req: Request) => {
     .single();
 
   if (challengeError || !challengeData) {
+    console.error("[auth_register] Invalid challenge:", challengeError?.message ?? "no data");
     return new Response(JSON.stringify({ error: "Invalid challenge" }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
@@ -44,6 +45,7 @@ serve(async (req: Request) => {
   }
 
   if (challengeData.action !== "register") {
+    console.error("[auth_register] Challenge action mismatch:", challengeData.action);
     return new Response(JSON.stringify({ error: "Challenge not for register" }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
@@ -63,13 +65,16 @@ serve(async (req: Request) => {
       expectedRPID: rpId,
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: "WebAuthn validation failed: " + error.message }), {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[auth_register] WebAuthn validation failed:", msg, "expectedOrigin=" + origin, "expectedRPID=" + rpId);
+    return new Response(JSON.stringify({ error: "WebAuthn validation failed: " + msg }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 
   if (!verification.verified) {
+    console.error("[auth_register] WebAuthn verification.verified=false");
     return new Response(JSON.stringify({ error: "WebAuthn verification failed" }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
@@ -94,6 +99,7 @@ serve(async (req: Request) => {
     .single();
 
   if (userError) {
+    console.error("[auth_register] users upsert error:", userError.message);
     return new Response(JSON.stringify({ error: userError.message }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
@@ -111,6 +117,7 @@ serve(async (req: Request) => {
     });
 
   if (deviceError) {
+    console.error("[auth_register] devices insert error:", deviceError.message);
     return new Response(JSON.stringify({ error: deviceError.message }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
