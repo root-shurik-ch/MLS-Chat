@@ -65,6 +65,9 @@ export class WebSocketManager {
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.config.url);
+        if (typeof window !== 'undefined') {
+          (window as unknown as { __ds_ws?: WebSocket }).__ds_ws = this.ws;
+        }
 
         // Connection timeout
         this.connectionTimeoutTimer = window.setTimeout(() => {
@@ -86,6 +89,13 @@ export class WebSocketManager {
 
         this.ws.onclose = (event) => {
           this.clearTimers();
+          if (typeof window !== 'undefined') {
+            (window as unknown as { __ds_last_close?: { code: number; reason: string; wasClean: boolean } }).__ds_last_close = {
+              code: event.code,
+              reason: event.reason,
+              wasClean: event.wasClean
+            };
+          }
           console.log('WebSocket closed', event.code, event.reason);
 
           if (this.state !== ConnectionState.DISCONNECTED) {
