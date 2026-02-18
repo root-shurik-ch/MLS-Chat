@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, handleCorsPreflight } from "../../_shared/cors.ts";
 
@@ -7,6 +6,7 @@ const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const groupChannels = new Map<string, any>();
+const groupRefCount = new Map<string, number>();
 
 function getGroupChannel(groupId: string) {
   if (!groupChannels.has(groupId)) {
@@ -18,7 +18,7 @@ function getGroupChannel(groupId: string) {
   return groupChannels.get(groupId);
 }
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   const upgrade = req.headers.get("upgrade");
   const origin = req.headers.get("origin");
   console.log("[ds_send] method=%s upgrade=%s origin=%s", req.method, upgrade ?? "(none)", origin ?? "(none)");
@@ -31,22 +31,25 @@ serve(async (req: Request) => {
     return new Response("Expected WebSocket", { status: 400, headers: corsHeaders(req) });
   }
 
-  const { socket, response } = Deno.upgradeWebSocket(req);
+  let socket: WebSocket;
+  let response: Response;
+  try {
+    const result = Deno.upgradeWebSocket(req);
+    socket = result.socket;
+    response = result.response;
+  } catch (err) {
+    console.error("[ds_send] upgradeWebSocket failed:", err);
+    return new Response("WebSocket upgrade failed", { status: 500, headers: corsHeaders(req) });
+  }
   console.log("[ds_send] WebSocket upgrade accepted, status=%s", response.status);
-  const mergedHeaders = new Headers(response.headers);
-  for (const [k, v] of Object.entries(corsHeaders(req))) mergedHeaders.set(k, v);
-  const responseWithCors = new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: mergedHeaders,
-  });
+  // Return the original response; wrapping in new Response() can cause 502 at the gateway
 
   const subscribedGroups = new Set<string>();
+  const broadcastListeners: Array<{ groupId: string; channel: any; callback: (payload: any) => void }> = [];
   let userId: string | null = null;
   let deviceId: string | null = null;
   let authenticated = false;
 
-  // Map to track broadcasted messages for this connection
   const deliveredMessages = new Set<number>();
 
   socket.onopen = () => {
@@ -109,41 +112,31 @@ serve(async (req: Request) => {
         deviceId = dev_id;
         authenticated = true;
 
-        // Subscribe to group channels
         for (const group_id of groups) {
           const channel = getGroupChannel(group_id);
 
-          // Listen for broadcast messages
-          channel.on('broadcast', { event: 'message' }, (payload: any) => {
+          const callback = (payload: any) => {
             const msg = payload.payload;
-
-            // Skip if we've already delivered this message to this client
-            // (prevents duplicate delivery on the same connection)
-            if (msg.server_seq && deliveredMessages.has(msg.server_seq)) {
-              return;
-            }
-
-            // Don't deliver own messages back
-            if (msg.sender_id === userId && msg.device_id === deviceId) {
-              return;
-            }
-
-            // Track delivered message
-            if (msg.server_seq) {
-              deliveredMessages.add(msg.server_seq);
-            }
-
-            // Deliver message to client
+            if (msg.server_seq && deliveredMessages.has(msg.server_seq)) return;
+            if (msg.sender_id === userId && msg.device_id === deviceId) return;
+            if (msg.server_seq) deliveredMessages.add(msg.server_seq);
             socket.send(JSON.stringify(msg));
-          });
+          };
 
-          await channel.subscribe((status: string) => {
-            if (status === "SUBSCRIBED") {
-              console.log(`User ${user_id} subscribed to group ${group_id}`);
-            } else if (status === "CHANNEL_ERROR") {
-              console.error(`Failed to subscribe to group ${group_id}`);
-            }
-          });
+          channel.on('broadcast', { event: 'message' }, callback);
+          broadcastListeners.push({ groupId: group_id, channel, callback });
+
+          const refCount = (groupRefCount.get(group_id) ?? 0) + 1;
+          groupRefCount.set(group_id, refCount);
+          if (refCount === 1) {
+            await channel.subscribe((status: string) => {
+              if (status === "SUBSCRIBED") {
+                console.log(`User ${user_id} subscribed to group ${group_id}`);
+              } else if (status === "CHANNEL_ERROR") {
+                console.error(`Failed to subscribe to group ${group_id}`);
+              }
+            });
+          }
 
           subscribedGroups.add(group_id);
         }
@@ -268,10 +261,15 @@ serve(async (req: Request) => {
   socket.onclose = () => {
     console.log("WebSocket closed for user:", userId);
 
-    // Unsubscribe from all channels
-    for (const groupId of subscribedGroups) {
-      const channel = getGroupChannel(groupId);
-      channel.unsubscribe();
+    for (const { groupId, channel, callback } of broadcastListeners) {
+      channel.off('broadcast', { event: 'message' }, callback);
+      const refCount = (groupRefCount.get(groupId) ?? 1) - 1;
+      groupRefCount.set(groupId, refCount);
+      if (refCount <= 0) {
+        groupRefCount.delete(groupId);
+        groupChannels.delete(groupId);
+        channel.unsubscribe();
+      }
     }
 
     subscribedGroups.clear();
@@ -282,5 +280,5 @@ serve(async (req: Request) => {
     console.error("WebSocket error:", error);
   };
 
-  return responseWithCors;
+  return response;
 });

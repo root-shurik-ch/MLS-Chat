@@ -126,7 +126,14 @@ const App: React.FC = () => {
       setView('chat');
     } catch (error) {
       console.error('Failed to select group:', error);
-      toast.error('Failed to open group. Please try again.');
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('Invalid user') || message.includes('Invalid device')) {
+        toast.error('Session not found. Please log in again.');
+      } else if (message.includes('timeout') || message.includes('Not connected')) {
+        toast.error('Connection problem. Please check your connection and try again.');
+      } else {
+        toast.error(`Failed to open group. ${message}`);
+      }
     }
   };
 

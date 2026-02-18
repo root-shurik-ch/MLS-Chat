@@ -71,9 +71,11 @@ supabase db push
 
 ### 1.3 Edge Functions
 
+Для WebSocket (ds_send) обязательно использовать в коде **Deno.serve**, а не `serve` из std — иначе шлюз возвращает 502. При деплое функции, которая не проверяет JWT в заголовке (браузер не шлёт заголовки при upgrade), укажи **--no-verify-jwt**:  
+`supabase functions deploy ds_send --no-verify-jwt --project-ref <ref>`.
+
 ```bash
-cd backend
-supabase functions deploy ds_send
+supabase functions deploy ds_send --no-verify-jwt
 supabase functions deploy auth_challenge
 supabase functions deploy auth_register
 supabase functions deploy auth_login
@@ -251,6 +253,32 @@ AS отвечает за регистрацию/логин (WebAuthn, челле
 
 ## Отладка WebSocket (ds_send)
 
+### План отладки по шагам
+
+1. **Задеплоить последний код**  
+   `git push origin main` — Cloudflare Pages соберёт фронт. Edge Function `ds_send` деплоится отдельно:  
+   `npx supabase functions deploy ds_send --project-ref <your-project-ref>` (если меняли код функции).
+
+2. **Проверить CORS в Supabase**  
+   **Dashboard → Project Settings → Edge Functions → Secrets.**  
+   Должен быть секрет `CORS_ALLOWED_ORIGINS` со значением, где есть ваш origin, например:  
+   `https://app.minimum.chat,https://minimum.chat,https://www.minimum.chat`  
+   Без пробелов, запятая между значениями. После сохранения секретов перезапуск функции не нужен.
+
+3. **Открыть сайт и DevTools**  
+   Зайти на https://app.minimum.chat, **F12 → Network → фильтр WS**. Обновить страницу или выполнить действие, при котором должен открываться WebSocket.
+
+4. **Посмотреть ответ сервера**  
+   В списке запросов клик по запросу к `ds_send` (URL вида `.../functions/v1/ds_send`). Во вкладке **Headers** смотреть:
+   - **Status Code**: 101 — успех; 400/403/502 — ошибка.
+   - **Request Headers**: есть ли `Upgrade: websocket`, какой `Origin`.
+   - **Response Headers**: при 101 должен быть `Access-Control-Allow-Origin` с вашим origin.
+
+5. **Посмотреть логи функции**  
+   **Supabase Dashboard → Edge Functions → ds_send → Logs.** Искать строки `[ds_send]`: приходят ли запросы, какой `upgrade`/`origin`, есть ли «Rejecting» или «WebSocket upgrade accepted».
+
+**Итог:** если в Network статус **403** — почти всегда CORS (добавить origin в секрет). Если **400** — в логах будет «Rejecting» (проверить заголовок Upgrade). Если **101** в Network, но в консоли всё равно ошибка — смотреть уже логику клиента или сообщения по сокету.
+
 ### Логи Edge Function
 
 В **Supabase Dashboard → Edge Functions → ds_send → Logs** смотреть строки:
@@ -276,6 +304,8 @@ AS отвечает за регистрацию/логин (WebAuthn, челле
 
 - В **Supabase → Edge Function Secrets** не указан origin приложения в `CORS_ALLOWED_ORIGINS` (для app.minimum.chat нужно `https://app.minimum.chat`).
 - Прокси или CDN обрезают заголовок `Upgrade` (редко).
+
+**«Failed to open group» / «Session not found»:** DS при подписке на группу проверяет, что `user_id` и `device_id` есть в таблицах **users** и **devices**. Если пользователь не проходил регистрацию через Edge Functions (auth_register) или схема БД не применена, запись не найдется. Нужно: применить схему (миграции / apply_schema.sql), зарегистрироваться через приложение заново, затем открывать группу.
 
 После изменения секретов перезадеплой не нужен; после изменения кода функции — задеплоить заново.
 

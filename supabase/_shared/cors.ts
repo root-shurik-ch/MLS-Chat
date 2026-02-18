@@ -31,11 +31,14 @@ function isAllowedOrigin(origin: string | null, allowed: string[]): boolean {
 export function corsHeaders(req: Request): Record<string, string> {
   const allowed = getAllowedOrigins();
   const origin = getOrigin(req);
-  return {
-    "Access-Control-Allow-Origin": isAllowedOrigin(origin, allowed) ? origin! : allowed[0],
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   };
+  if (isAllowedOrigin(origin, allowed) && origin) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+  return headers;
 }
 
 export function handleCorsPreflight(req: Request): Response | null {
