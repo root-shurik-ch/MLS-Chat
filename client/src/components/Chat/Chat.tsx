@@ -75,22 +75,6 @@ const Chat: React.FC<ChatProps> = ({
             ? m.server_time
             : new Date(m.server_time as string).getTime();
 
-          // MLS senders cannot decrypt their own ciphertext (CannotDecryptOwnMessage).
-          // Show own messages with a placeholder — plaintext is only available in the
-          // current session's memory. A future improvement: cache plaintext in IndexedDB.
-          if (m.device_id === deviceId) {
-            parsed.push({
-              id: `msg_${m.server_seq}`,
-              senderId: m.sender_id,
-              deviceId: m.device_id,
-              text: '(your message — text only available in the session it was sent)',
-              timestamp: ts,
-              serverSeq: m.server_seq,
-              isSent: true,
-            });
-            continue;
-          }
-
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
             parsed.push({
@@ -100,10 +84,24 @@ const Chat: React.FC<ChatProps> = ({
               text: plaintext,
               timestamp: ts,
               serverSeq: m.server_seq,
-              isSent: false,
+              isSent: m.device_id === deviceId,
             });
-          } catch {
-            // Skip undecryptable (e.g. from before we joined)
+          } catch (e) {
+            if (String(e).includes('CannotDecryptOwnMessage')) {
+              // MLS senders cannot decrypt their own ciphertext — this device's
+              // leaf node was the encryptor. Show a placeholder regardless of
+              // which device_id sent it (multi-device may share the same MLS state).
+              parsed.push({
+                id: `msg_${m.server_seq}`,
+                senderId: m.sender_id,
+                deviceId: m.device_id,
+                text: '(your message — text only available in the session it was sent)',
+                timestamp: ts,
+                serverSeq: m.server_seq,
+                isSent: true,
+              });
+            }
+            // Other errors (e.g. message from before this device joined): silently skip
           }
         }
         if (mounted) {
