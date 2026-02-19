@@ -11,6 +11,7 @@ MLS-Chat is an open-source, end-to-end encrypted chat app built with Messaging L
 - [Architecture](#architecture)
 - [Installation](#installation)
 - [Roadmap](#roadmap)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -33,7 +34,8 @@ MLS-Chat follows a client-server architecture with strict separation of concerns
 
 All MLS operations (encryption, key management) happen client-side. Servers only see ciphertext.
 
-For detailed diagrams, see [diagrams/architecture.md](diagrams/architecture.md).
+- **Tech stack and auth**: [docs/OPENSOURCE_STACK.md](docs/OPENSOURCE_STACK.md) — WebAuthn (SimpleWebAuthn v13), Supabase Edge Functions, DB schema, client stack.
+- **Diagrams**: [diagrams/architecture.md](diagrams/architecture.md) (if present).
 
 ## Installation
 
@@ -110,6 +112,12 @@ The project follows a phased implementation plan:
    - Complete docs and CI/CD setup
 
 See [.opencode/tasks/final-implementation.md](.opencode/tasks/final-implementation.md) for detailed task breakdown.
+
+## Documentation
+
+- **[docs/OPENSOURCE_STACK.md](docs/OPENSOURCE_STACK.md)** — What we use and how: WebAuthn (passkeys, SimpleWebAuthn v13), Supabase Edge Functions, database, client stack. For contributors and self-hosters.
+- **[docs/DEPLOY_STEPS_NOW.md](docs/DEPLOY_STEPS_NOW.md)** — Step-by-step deploy (Supabase + frontend).
+- **[docs/DEPLOY_MINIMUM_CHAT.md](docs/DEPLOY_MINIMUM_CHAT.md)** — Deploy architecture (e.g. Cloudflare Pages + Supabase).
 
 ## Contributing
 
