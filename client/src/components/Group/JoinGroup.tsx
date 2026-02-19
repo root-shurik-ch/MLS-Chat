@@ -9,6 +9,20 @@ interface JoinGroupProps {
   onJoinSuccess: (groupId: string) => void;
 }
 
+function parseInviteCode(input: string): { groupId: string; welcome: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  try {
+    const data = JSON.parse(trimmed) as { groupId?: string; welcome?: string };
+    if (typeof data.groupId === 'string' && typeof data.welcome === 'string') {
+      return { groupId: data.groupId, welcome: data.welcome };
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
 export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }) => {
   const [welcomeCode, setWelcomeCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,34 +34,53 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
       return;
     }
 
+    const parsed = parseInviteCode(welcomeCode);
+    if (!parsed) {
+      toast.error('Invalid invitation format. Paste the full code shared by the inviter (must include group id).');
+      return;
+    }
+
+    const { groupId: serverGroupId, welcome } = parsed;
+    const userId = localStorage.getItem('userId');
+    const deviceId = localStorage.getItem('deviceId');
+    if (!userId || !deviceId) {
+      toast.error('Not logged in. Please log in first.');
+      return;
+    }
+
     try {
       setLoading(true);
 
-      // Generate KeyPackage for this device
-      // Note: In production, this KeyPackage should have been generated
-      // beforehand and sent to the person creating the invitation
       const keyPackage = await mlsClient.generateKeyPackage();
-
-      // Process the Welcome message to join the group
       console.log('Processing Welcome message...');
-      const mlsGroup = await mlsClient.processWelcome(
-        welcomeCode.trim(),
-        keyPackage.ref
-      );
+      const mlsGroup = await mlsClient.processWelcome(welcome, keyPackage.ref);
 
-      // Save the group to IndexedDB
-      await saveMlsGroup(mlsGroup);
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('VITE_SUPABASE_URL is not set');
+      }
+      const joinRes = await fetch(`${supabaseUrl}/functions/v1/group_join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_id: serverGroupId,
+          user_id: userId,
+          device_id: deviceId,
+        }),
+      });
+      if (!joinRes.ok) {
+        const err = await joinRes.json().catch(() => ({ error: joinRes.statusText }));
+        throw new Error(err.error || 'Failed to register as group member');
+      }
 
-      toast.success(`Successfully joined group!`);
+      await saveMlsGroup({ ...mlsGroup, groupId: serverGroupId });
 
-      // Clear input
+      toast.success('Successfully joined group!');
       setWelcomeCode('');
-
-      // Notify parent component
-      onJoinSuccess(mlsGroup.groupId);
+      onJoinSuccess(serverGroupId);
     } catch (error) {
       console.error('Failed to join group:', error);
-      toast.error('Failed to join group. Please check the invitation code and try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to join group. Please try again.');
     } finally {
       setLoading(false);
     }

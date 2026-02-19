@@ -17,7 +17,7 @@ export const InviteLink: React.FC<InviteLinkProps> = ({
   onInviteGenerated
 }) => {
   const [loading, setLoading] = useState(false);
-  const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null);
+  const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null); // JSON: { groupId, welcome }
   const toast = useToastContext();
 
   const handleGenerateInvite = async () => {
@@ -32,8 +32,9 @@ export const InviteLink: React.FC<InviteLinkProps> = ({
       const result = await mlsClient.addMember(mlsGroup, tempKeyPackage);
 
       if (result.welcome) {
-        setWelcomeMessage(result.welcome);
-        onInviteGenerated?.(result.welcome);
+        const payload = JSON.stringify({ groupId, welcome: result.welcome });
+        setWelcomeMessage(payload);
+        onInviteGenerated?.(payload);
         toast.success('Invitation generated! Share the code below.');
       } else {
         throw new Error('Welcome message not generated');

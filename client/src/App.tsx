@@ -7,7 +7,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
-import { loadAllMlsGroups, saveMlsGroup } from './utils/mlsGroupStorage';
+import { loadAllMlsGroups, loadMlsGroup, saveMlsGroup } from './utils/mlsGroupStorage';
 import UIShowcase from './pages/UIShowcase';
 
 type AppView = 'auth' | 'groups' | 'chat' | 'ui';
@@ -96,18 +96,21 @@ const App: React.FC = () => {
       let mlsGroup = mlsGroups.get(groupId);
 
       if (!mlsGroup && mlsClientRef.current) {
-        // Create new MLS group
-        console.log('Creating MLS group:', groupId);
-        mlsGroup = await mlsClientRef.current.createGroup(groupId);
-
-        // Save to state and IndexedDB
-        const newGroups = new Map(mlsGroups);
-        newGroups.set(groupId, mlsGroup);
-        setMlsGroups(newGroups);
-
-        // Persist to IndexedDB
-        await saveMlsGroup(mlsGroup);
-        console.log('MLS group saved to IndexedDB');
+        const loaded = await loadMlsGroup(groupId);
+        if (loaded) {
+          mlsGroup = loaded;
+          const newGroups = new Map(mlsGroups);
+          newGroups.set(groupId, mlsGroup);
+          setMlsGroups(newGroups);
+        }
+        if (!mlsGroup) {
+          console.log('Creating MLS group:', groupId);
+          mlsGroup = await mlsClientRef.current.createGroup(groupId);
+          const newGroups = new Map(mlsGroups);
+          newGroups.set(groupId, mlsGroup);
+          setMlsGroups(newGroups);
+          await saveMlsGroup(mlsGroup);
+        }
       }
 
       if (mlsGroup && deliveryServiceRef.current) {
