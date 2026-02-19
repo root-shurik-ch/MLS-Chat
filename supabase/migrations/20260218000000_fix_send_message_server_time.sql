@@ -1,19 +1,4 @@
-create table if not exists public.group_seq (
-  group_id        text primary key,
-  last_server_seq bigint not null default 0
-);
-
-create table if not exists public.messages (
-  group_id    text not null references public.groups(group_id),
-  server_seq  bigint not null,
-  server_time timestamptz not null default now(),
-  sender_id   text not null references public.devices(device_id),
-  device_id   text not null references public.devices(device_id),
-  msg_kind    text not null,
-  mls_bytes   text not null,
-  primary key (group_id, server_seq)
-);
-
+-- Fix ambiguous "server_time" in send_message RETURNING (qualify with table name)
 create or replace function send_message(
   p_group_id text,
   p_sender_id text,
@@ -25,7 +10,6 @@ declare
   v_server_seq bigint;
   v_server_time bigint;
 begin
-  -- Lock the row for update
   select last_server_seq into v_server_seq from group_seq where group_id = p_group_id for update;
   if not found then
     v_server_seq := 0;
@@ -43,4 +27,3 @@ begin
   return query select v_server_seq, v_server_time;
 end;
 $$ language plpgsql;
-

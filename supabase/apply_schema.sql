@@ -82,7 +82,7 @@ begin
 
   insert into messages (group_id, server_seq, sender_id, device_id, msg_kind, mls_bytes)
   values (p_group_id, v_server_seq, p_sender_id, p_device_id, p_msg_kind, p_mls_bytes)
-  returning (extract(epoch from server_time) * 1000)::bigint into v_server_time;
+  returning (extract(epoch from messages.server_time) * 1000)::bigint into v_server_time;
 
   return query select v_server_seq, v_server_time;
 end;
