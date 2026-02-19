@@ -45,6 +45,70 @@ const Chat: React.FC<ChatProps> = ({
   // Toast notifications
   const toast = useToastContext();
 
+  // Load message history when opening chat
+  useEffect(() => {
+    let mounted = true;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (!supabaseUrl) return;
+
+    const loadHistory = async () => {
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/get_messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_id: groupId, user_id: userId, device_id: deviceId }),
+        });
+        if (!res.ok) return;
+        const { messages: list } = (await res.json()) as { messages?: Array<{
+          server_seq: number;
+          server_time: number | string;
+          sender_id: string;
+          device_id: string;
+          msg_kind: string;
+          mls_bytes: string;
+        }> };
+        if (!Array.isArray(list) || list.length === 0) return;
+        const parsed: Message[] = [];
+        for (const m of list) {
+          try {
+            const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
+            const ts = typeof m.server_time === 'number'
+              ? m.server_time
+              : new Date(m.server_time as string).getTime();
+            parsed.push({
+              id: `msg_${m.server_seq}`,
+              senderId: m.sender_id,
+              deviceId: m.device_id,
+              text: plaintext,
+              timestamp: ts,
+              serverSeq: m.server_seq,
+              isSent: m.device_id === deviceId,
+            });
+          } catch {
+            // Skip undecryptable (e.g. from before we joined)
+          }
+        }
+        if (mounted) {
+          setMessages(prev => {
+            const bySeq = new Map<number, Message>();
+            parsed.forEach(p => { if (p.serverSeq != null) bySeq.set(p.serverSeq, p); });
+            prev.forEach(m => { if (m.serverSeq != null) bySeq.set(m.serverSeq, m); });
+            const pending = prev.filter(m => m.serverSeq == null);
+            const all = [...bySeq.values(), ...pending];
+            all.sort((a, b) =>
+              (a.serverSeq ?? 0) - (b.serverSeq ?? 0) || a.timestamp - b.timestamp
+            );
+            return all;
+          });
+        }
+      } catch (e) {
+        console.error('Failed to load message history:', e);
+      }
+    };
+    loadHistory();
+    return () => { mounted = false; };
+  }, [groupId, userId, deviceId, mlsGroup, mlsClient]);
+
   // Subscribe to group and handle incoming messages
   useEffect(() => {
     let mounted = true;

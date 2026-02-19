@@ -84,16 +84,24 @@ export class MlsClient {
       if (!result || typeof result !== 'object') {
         throw new Error('Key package generation returned invalid result')
       }
-      const data = result.data
+      // serde_wasm_bindgen may return a Map instead of plain object
+      const get = (key: string) =>
+        (result as Map<string, unknown>).get?.(key) ?? (result as Record<string, unknown>)[key]
+      const toObj = (v: unknown): Record<string, unknown> =>
+        v == null ? {} : (v instanceof Map ? Object.fromEntries(v) : (v as Record<string, unknown>))
+      const data = get('data')
       if (typeof data !== 'string' || data.length === 0) {
-        throw new Error('Key package generation returned missing or empty data')
+        const keys = result instanceof Map ? [...result.keys()] : Object.keys(result)
+        throw new Error(
+          `Key package generation returned missing or empty data (keys: ${keys.join(', ')})`
+        )
       }
       const keyPackage: KeyPackage = {
         data,
-        signature: result.signature ?? '',
-        hpkePublicKey: result.hpke_public_key ?? '',
-        credential: result.credential ?? '',
-        extensions: result.extensions ?? {}
+        signature: (get('signature') as string) ?? '',
+        hpkePublicKey: (get('hpke_public_key') as string) ?? '',
+        credential: (get('credential') as string) ?? '',
+        extensions: toObj(get('extensions'))
       }
       return keyPackage
     } catch (error) {
