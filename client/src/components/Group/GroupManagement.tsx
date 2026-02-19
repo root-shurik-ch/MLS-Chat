@@ -1,13 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GroupMeta } from '../../domain/Group';
 import JoinGroup from './JoinGroup';
+import CreateGroupForm from './CreateGroupForm';
 import { MlsClient } from '../../mls/index';
+import { IndexedDBStorage } from '../../utils/storage';
 
 interface GroupManagementProps {
   userId: string;
   deviceId: string;
   mlsClient: MlsClient | null;
   onSelectGroup: (groupId: string) => void;
+}
+
+async function loadGroupMetasFromIndexedDB(): Promise<GroupMeta[]> {
+  const storage = new IndexedDBStorage('mls-groups', 'groups');
+  await storage.init();
+  const keys = await storage.getAllKeys();
+  const metas: GroupMeta[] = [];
+  for (const key of keys) {
+    const meta = await storage.get(key);
+    if (meta && typeof meta.groupId === 'string' && typeof meta.name === 'string') {
+      metas.push(meta as GroupMeta);
+    }
+  }
+  return metas;
 }
 
 const GroupManagement: React.FC<GroupManagementProps> = ({
@@ -19,30 +35,23 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [groups, setGroups] = useState<GroupMeta[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
 
-  useEffect(() => {
-    const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-    setGroups(storedGroups);
+  const loadGroups = useCallback(async () => {
+    const fromIndexedDB = await loadGroupMetasFromIndexedDB();
+    const fromLocal = JSON.parse(localStorage.getItem('groups') || '[]') as GroupMeta[];
+    const byId = new Map<string, GroupMeta>();
+    for (const g of fromLocal) {
+      if (g?.groupId && g?.name) byId.set(g.groupId, g);
+    }
+    for (const g of fromIndexedDB) {
+      byId.set(g.groupId, g);
+    }
+    setGroups(Array.from(byId.values()));
   }, []);
 
-  const handleCreateGroup = () => {
-    if (!newGroupName.trim()) return;
-
-    const newGroup: GroupMeta = {
-      groupId: 'group_' + Date.now(),
-      name: newGroupName,
-      dsUrl: 'ws://localhost:54321/functions/v1/ds_send',
-      currentEpoch: 0,
-    };
-
-    const updatedGroups = [...groups, newGroup];
-    setGroups(updatedGroups);
-    localStorage.setItem('groups', JSON.stringify(updatedGroups));
-    
-    setNewGroupName('');
-    setShowCreateForm(false);
-  };
+  useEffect(() => {
+    loadGroups();
+  }, [loadGroups]);
 
   const handleOpenChat = (groupId: string) => {
     onSelectGroup(groupId);
@@ -97,18 +106,13 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         </div>
       )}
 
-      {/* Create Form */}
+      {/* Create Form: full flow (MLS + group_create API + IndexedDB) so sending messages works */}
       {showCreateForm && (
         <div style={{ marginBottom: 20 }}>
-          <input
-            type="text"
-            placeholder="Group Name"
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-            style={{ width: '100%', padding: 8, marginBottom: 10 }}
-          />
-          <button onClick={handleCreateGroup}>Create</button>
-          <button onClick={() => setShowCreateForm(false)}>Cancel</button>
+          <CreateGroupForm />
+          <button onClick={() => setShowCreateForm(false)} style={{ marginTop: 10 }}>
+            Cancel
+          </button>
         </div>
       )}
 

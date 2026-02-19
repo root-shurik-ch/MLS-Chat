@@ -85,7 +85,7 @@ The project follows a phased implementation plan:
    - React/Vue SPA with mobile support
    - WebAuthn mandatory authentication
 
-3. **Authentication Service**
+3. **Authentication Service** ✅ (registration and login work)
    - Supabase Edge Function for WebAuthn registration/login
    - Secure storage of encrypted private keys
 
@@ -93,7 +93,7 @@ The project follows a phased implementation plan:
    - WebSocket-based message delivery
    - Server sequence numbering
 
-5. **WebAuthn Integration**
+5. **WebAuthn Integration** ✅ (passkey registration and login)
    - PRF-based key derivation
    - Cross-device compatibility
 

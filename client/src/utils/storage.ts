@@ -56,4 +56,15 @@ export class IndexedDBStorage {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async getAllKeys(): Promise<string[]> {
+    if (!this.db) throw new Error('DB not initialized');
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([this.storeName], 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.getAllKeys();
+      request.onsuccess = () => resolve((request.result as IDBValidKey[]).map(String));
+      request.onerror = () => reject(request.error);
+    });
+  }
 }

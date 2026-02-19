@@ -47,6 +47,7 @@ This document describes the technologies and patterns used in MLS-Chat for contr
 | `auth_register`  | Verifies WebAuthn registration, creates user + device, stores passkey. |
 | `auth_login`     | Verifies WebAuthn authentication, returns auth token and device MLS keys. |
 | `auth_keypackage` | MLS key package upload/lookup for group join. |
+| `group_create`    | Creates a group on the server (groups, group_members, group_seq) so the creator can send messages. |
 | `ds_send`        | WebSocket endpoint for message delivery (MLS ciphertext). |
 
 - **Runtime**: Deno. HTTP via `serve()` from `deno.land/std`.

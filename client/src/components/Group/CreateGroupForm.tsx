@@ -42,22 +42,45 @@ const CreateGroupForm: React.FC = () => {
       const groupManager = new GroupManager(mlsClient);
       await groupManager.createGroup(groupId);
 
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('VITE_SUPABASE_URL is not set');
+      }
+      const dsUrl = import.meta.env.VITE_WS_URL || (() => {
+        const u = new URL(supabaseUrl);
+        return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send';
+      })();
+      const res = await fetch(`${supabaseUrl}/functions/v1/group_create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_id: groupId,
+          name,
+          avatar_url: avatarUrl || undefined,
+          user_id: userId,
+          device_id: deviceId,
+          ds_url: dsUrl,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || 'Failed to create group on server');
+      }
+
       const groupMeta: GroupMeta = {
         groupId,
         name,
         avatarUrl: avatarUrl || undefined,
-        dsUrl: 'wss://your-ds-url', // TODO: configure
+        dsUrl,
         currentEpoch: 0,
       };
 
-      // Store group metadata in IndexedDB
       const groupStorage = new IndexedDBStorage('mls-groups', 'groups');
       await groupStorage.init();
       await groupStorage.set(groupId, groupMeta);
 
       toast.success('Group created successfully!');
-      // TODO: navigate or refresh
-      window.location.reload(); // simple refresh
+      window.location.reload();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to create group';
       setError(errorMsg);
