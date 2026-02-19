@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { MlsClient, MlsGroup } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
+import { saveWasmState } from '../../utils/mlsGroupStorage';
 
 interface InviteLinkProps {
   groupId: string;
@@ -35,6 +36,18 @@ export const InviteLink: React.FC<InviteLinkProps> = ({
         const payload = JSON.stringify({ groupId, welcome: result.welcome });
         setWelcomeMessage(payload);
         onInviteGenerated?.(payload);
+
+        // Persist WASM state (epoch advanced after add_member)
+        const userId = localStorage.getItem('userId');
+        if (userId) {
+          try {
+            const stateJson = await mlsClient.exportState();
+            await saveWasmState(userId, stateJson);
+          } catch (e) {
+            console.warn('Failed to save WASM state after invite generation:', e);
+          }
+        }
+
         toast.success('Invitation generated! Share the code below.');
       } else {
         throw new Error('Welcome message not generated');

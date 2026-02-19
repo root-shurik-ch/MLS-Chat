@@ -9,7 +9,10 @@ import init, {
   process_welcome,
   apply_commit,
   create_update_proposal,
-  add_member
+  add_member,
+  export_state,
+  import_state,
+  load_group,
 } from './wasm/pkg/mls_wasm'
 import { decodeBase64Url, encodeBase64Url } from '../utils/crypto'
 
@@ -198,5 +201,40 @@ export class MlsClient {
     // Returns hex-encoded proposal
     const proposalHex = create_update_proposal(group.groupId)
     return proposalHex
+  }
+
+  /**
+   * Export full WASM state (backend storage + signer) as a JSON string.
+   * Save this to IndexedDB after important operations for cross-session persistence.
+   */
+  async exportState(): Promise<string> {
+    await this.init()
+    return export_state()
+  }
+
+  /**
+   * Import previously exported WASM state.
+   * Call this on app start before loadGroup to restore groups from storage.
+   */
+  async importState(stateJson: string): Promise<void> {
+    await this.init()
+    import_state(stateJson)
+  }
+
+  /**
+   * Load a previously persisted MLS group from the shared backend's storage.
+   * Call after importState. groupIdHex is the MLS group ID (hex) from the stored MlsGroup.
+   */
+  async loadGroup(groupIdHex: string, appGroupId: string): Promise<MlsGroup> {
+    await this.init()
+    const result = load_group(groupIdHex)
+    const groupState = JSON.parse(result)
+    return {
+      id: appGroupId,
+      epoch: groupState.epoch,
+      groupId: groupState.group_id,
+      treeHash: groupState.tree_hash,
+      epochAuthenticator: groupState.epoch_authenticator,
+    }
   }
 }

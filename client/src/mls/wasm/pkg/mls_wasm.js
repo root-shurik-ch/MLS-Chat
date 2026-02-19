@@ -197,6 +197,31 @@ export function encrypt(group_id_hex, plaintext) {
 }
 
 /**
+ * Export the full WASM state (backend storage + signer) as a JSON string.
+ * Call this after important operations (create_group, process_welcome, add_member)
+ * and save the result to persistent storage (IndexedDB) to enable cross-session restore.
+ * @returns {string}
+ */
+export function export_state() {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ret = wasm.export_state();
+        var ptr1 = ret[0];
+        var len1 = ret[1];
+        if (ret[3]) {
+            ptr1 = 0; len1 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred2_0 = ptr1;
+        deferred2_1 = len1;
+        return getStringFromWasm0(ptr1, len1);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Generate a key package for joining groups
  * @param {Uint8Array} credential_identity
  * @returns {any}
@@ -218,6 +243,48 @@ export function greet(name) {
     const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     wasm.greet(ptr0, len0);
+}
+
+/**
+ * Import previously exported WASM state.
+ * Call this on app start before calling load_group to restore groups from storage.
+ * @param {string} state_json
+ */
+export function import_state(state_json) {
+    const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.import_state(ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * Load a previously persisted MLS group from the shared backend's storage.
+ * Call this after import_state to restore groups into the in-memory GROUPS map.
+ * group_id_hex is the MLS group ID (hex-encoded), as returned by create_group/process_welcome.
+ * @param {string} group_id_hex
+ * @returns {string}
+ */
+export function load_group(group_id_hex) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(group_id_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.load_group(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
 }
 
 /**

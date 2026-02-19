@@ -1,10 +1,12 @@
 // src/mls/wasm/src/provider.rs
-// OpenMLS provider for crypto operations in WASM environment
+// Shared OpenMLS crypto backend for the WASM session
 
+use std::cell::RefCell;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 
-/// Get the OpenMLS crypto backend
-/// Uses OpenMlsRustCrypto which works in WASM environment without browser dependencies
-pub fn get_backend() -> OpenMlsRustCrypto {
-    OpenMlsRustCrypto::default()
+thread_local! {
+    /// Shared backend instance for the WASM session.
+    /// Using a shared instance ensures all group operations write to the same storage,
+    /// enabling full state persistence via export_state/import_state.
+    pub static BACKEND: RefCell<OpenMlsRustCrypto> = RefCell::new(OpenMlsRustCrypto::default());
 }

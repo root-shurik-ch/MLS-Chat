@@ -4,6 +4,7 @@ import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase'
 import { MlsClient, MlsGroup } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
 import InviteLink from '../Group/InviteLink';
+import { saveWasmState } from '../../utils/mlsGroupStorage';
 
 interface ChatProps {
   userId: string;
@@ -95,11 +96,26 @@ const Chat: React.FC<ChatProps> = ({
             prev.forEach(m => { if (m.serverSeq != null) bySeq.set(m.serverSeq, m); });
             const pending = prev.filter(m => m.serverSeq == null);
             const all = [...bySeq.values(), ...pending];
-            all.sort((a, b) =>
-              (a.serverSeq ?? 0) - (b.serverSeq ?? 0) || a.timestamp - b.timestamp
-            );
+            all.sort((a, b) => {
+              const aSeq = a.serverSeq;
+              const bSeq = b.serverSeq;
+              if (aSeq != null && bSeq != null) return aSeq - bSeq;
+              if (aSeq != null) return -1;
+              if (bSeq != null) return 1;
+              return a.timestamp - b.timestamp;
+            });
             return all;
           });
+
+          // Save WASM state after history load — the ratchet has advanced
+          if (parsed.length > 0 && mounted) {
+            const savedUserId = localStorage.getItem('userId');
+            if (savedUserId) {
+              mlsClient.exportState().then(stateJson =>
+                saveWasmState(savedUserId, stateJson)
+              ).catch(e => console.warn('Failed to save WASM state after history load:', e));
+            }
+          }
         }
       } catch (e) {
         console.error('Failed to load message history:', e);
@@ -157,9 +173,11 @@ const Chat: React.FC<ChatProps> = ({
                 return prev;
               }
               return [...prev, newMessage].sort((a, b) => {
-                if (a.serverSeq && b.serverSeq) {
-                  return a.serverSeq - b.serverSeq;
-                }
+                const aSeq = a.serverSeq;
+                const bSeq = b.serverSeq;
+                if (aSeq != null && bSeq != null) return aSeq - bSeq;
+                if (aSeq != null) return -1;
+                if (bSeq != null) return 1;
                 return a.timestamp - b.timestamp;
               });
             });

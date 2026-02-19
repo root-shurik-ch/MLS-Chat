@@ -44,11 +44,31 @@ export function decrypt(group_id_hex: string, ciphertext_hex: string): string;
 export function encrypt(group_id_hex: string, plaintext: string): string;
 
 /**
+ * Export the full WASM state (backend storage + signer) as a JSON string.
+ * Call this after important operations (create_group, process_welcome, add_member)
+ * and save the result to persistent storage (IndexedDB) to enable cross-session restore.
+ */
+export function export_state(): string;
+
+/**
  * Generate a key package for joining groups
  */
 export function generate_key_package(credential_identity: Uint8Array): any;
 
 export function greet(name: string): void;
+
+/**
+ * Import previously exported WASM state.
+ * Call this on app start before calling load_group to restore groups from storage.
+ */
+export function import_state(state_json: string): void;
+
+/**
+ * Load a previously persisted MLS group from the shared backend's storage.
+ * Call this after import_state to restore groups into the in-memory GROUPS map.
+ * group_id_hex is the MLS group ID (hex-encoded), as returned by create_group/process_welcome.
+ */
+export function load_group(group_id_hex: string): string;
 
 /**
  * Process a welcome message to join a group
@@ -67,8 +87,11 @@ export interface InitOutput {
     readonly create_update_proposal: (a: number, b: number) => [number, number, number, number];
     readonly decrypt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly encrypt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly export_state: () => [number, number, number, number];
     readonly generate_key_package: (a: number, b: number) => [number, number, number];
     readonly greet: (a: number, b: number) => void;
+    readonly import_state: (a: number, b: number) => [number, number];
+    readonly load_group: (a: number, b: number) => [number, number, number, number];
     readonly process_welcome: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

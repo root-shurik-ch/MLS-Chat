@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { MlsClient } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
-import { saveMlsGroup } from '../../utils/mlsGroupStorage';
+import { saveMlsGroup, saveWasmState } from '../../utils/mlsGroupStorage';
 
 interface JoinGroupProps {
   mlsClient: MlsClient;
@@ -73,7 +73,17 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
         throw new Error(err.error || 'Failed to register as group member');
       }
 
-      await saveMlsGroup({ ...mlsGroup, groupId: serverGroupId });
+      await saveMlsGroup({ ...mlsGroup, id: serverGroupId, groupId: mlsGroup.groupId });
+
+      // Persist WASM state so the group survives page reloads
+      if (userId) {
+        try {
+          const stateJson = await mlsClient.exportState();
+          await saveWasmState(userId, stateJson);
+        } catch (e) {
+          console.warn('Failed to save WASM state after joining group:', e);
+        }
+      }
 
       toast.success('Successfully joined group!');
       setWelcomeCode('');

@@ -7,7 +7,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
-import { loadAllMlsGroups, loadMlsGroup, saveMlsGroup } from './utils/mlsGroupStorage';
+import { saveMlsGroup, loadAllMlsGroups, saveWasmState, loadWasmState, deleteWasmState } from './utils/mlsGroupStorage';
 
 type AppView = 'auth' | 'groups' | 'chat';
 
@@ -55,16 +55,32 @@ const App: React.FC = () => {
 
       await deliveryServiceRef.current.connect(wsUrl, authToken);
 
-      // Load saved MLS groups from IndexedDB
-      console.log('Loading saved MLS groups...');
-      const savedGroups = await loadAllMlsGroups();
-      if (savedGroups.length > 0) {
-        const groupsMap = new Map<string, MlsGroup>();
-        savedGroups.forEach(group => {
-          groupsMap.set(group.groupId, group);
-        });
-        setMlsGroups(groupsMap);
-        console.log(`Loaded ${savedGroups.length} MLS groups from storage`);
+      // Restore MLS state from IndexedDB so groups can be decrypted after page reload
+      try {
+        const stateJson = await loadWasmState(userId);
+        if (stateJson && mlsClientRef.current) {
+          await mlsClientRef.current.importState(stateJson);
+          console.log('Restored WASM state from IndexedDB');
+
+          // Restore each known group into the WASM GROUPS map
+          const storedGroups = await loadAllMlsGroups();
+          const restoredGroups = new Map<string, MlsGroup>();
+          for (const stored of storedGroups) {
+            try {
+              const mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
+              restoredGroups.set(stored.id, mlsGroup);
+              console.log('Restored group:', stored.id);
+            } catch (e) {
+              console.warn('Could not restore group', stored.id, e);
+            }
+          }
+          if (restoredGroups.size > 0) {
+            setMlsGroups(restoredGroups);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to restore WASM state:', e);
+        // Non-fatal: groups will be recreated fresh when opened
       }
 
       console.log('Services initialized successfully');
@@ -91,24 +107,26 @@ const App: React.FC = () => {
 
   const handleSelectGroup = async (groupId: string) => {
     try {
-      // Check if MLS group already exists
+      // Check if MLS group already exists in current session
       let mlsGroup = mlsGroups.get(groupId);
 
       if (!mlsGroup && mlsClientRef.current) {
-        const loaded = await loadMlsGroup(groupId);
-        if (loaded) {
-          mlsGroup = loaded;
-          const newGroups = new Map(mlsGroups);
-          newGroups.set(groupId, mlsGroup);
-          setMlsGroups(newGroups);
-        }
-        if (!mlsGroup) {
-          console.log('Creating MLS group:', groupId);
-          mlsGroup = await mlsClientRef.current.createGroup(groupId);
-          const newGroups = new Map(mlsGroups);
-          newGroups.set(groupId, mlsGroup);
-          setMlsGroups(newGroups);
-          await saveMlsGroup(mlsGroup);
+        // Create WASM group and persist state so it survives page reloads
+        console.log('Creating MLS group:', groupId);
+        mlsGroup = await mlsClientRef.current.createGroup(groupId);
+        const newGroups = new Map(mlsGroups);
+        newGroups.set(groupId, mlsGroup);
+        setMlsGroups(newGroups);
+
+        // Persist group metadata and full WASM state
+        await saveMlsGroup(mlsGroup);
+        if (userId) {
+          try {
+            const stateJson = await mlsClientRef.current.exportState();
+            await saveWasmState(userId, stateJson);
+          } catch (e) {
+            console.warn('Failed to save WASM state after group creation:', e);
+          }
         }
       }
 
@@ -150,6 +168,11 @@ const App: React.FC = () => {
 
     mlsClientRef.current = null;
     setMlsGroups(new Map());
+
+    // Clean up persisted WASM state for this user
+    if (userId) {
+      deleteWasmState(userId).catch(() => {});
+    }
 
     localStorage.clear();
     setUserId(null);
