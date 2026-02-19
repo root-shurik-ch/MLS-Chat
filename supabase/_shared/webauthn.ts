@@ -17,3 +17,15 @@ export function base64UrlToBytes(base64url: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+/** Normalize challenge from DB to base64url (library and clientDataJSON use base64url). Handles legacy base64. */
+export function challengeToBase64Url(challengeFromDb: string): string {
+  if (challengeFromDb.includes("+") || challengeFromDb.includes("/")) {
+    const b64 = challengeFromDb.padEnd(challengeFromDb.length + (4 - (challengeFromDb.length % 4)) % 4, "=");
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytesToBase64Url(bytes);
+  }
+  return challengeFromDb;
+}

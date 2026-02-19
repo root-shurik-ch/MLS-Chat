@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifyRegistrationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
+import { verifyRegistrationResponse } from "https://esm.sh/@simplewebauthn/server@13";
 import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
-import { bytesToBase64Url, challengeToBase64Url } from "../../_shared/webauthn.ts";
+import { challengeToBase64Url } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -191,9 +191,9 @@ serve(async (req: Request) => {
     });
   }
 
-  const credId = verification.registrationInfo!.credentialID;
-  const credIdStr = bytesToBase64Url(new Uint8Array(credId));
-  const credPk = verification.registrationInfo!.credentialPublicKey;
+  const cred = verification.registrationInfo!.credential;
+  const credIdStr = cred.id;
+  const credPk = cred.publicKey;
 
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -201,7 +201,7 @@ serve(async (req: Request) => {
       user_id,
       avatar_url: null,
       passkey_credential_id: credIdStr,
-      passkey_public_key: JSON.stringify(credPk),
+      passkey_public_key: JSON.stringify(Array.from(credPk)),
     })
     .select()
     .single();

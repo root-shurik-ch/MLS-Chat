@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifyAuthenticationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
+import { verifyAuthenticationResponse } from "https://esm.sh/@simplewebauthn/server@13";
 import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
-import { base64UrlToBytes, challengeToBase64Url } from "../../_shared/webauthn.ts";
+import { challengeToBase64Url } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -91,9 +91,9 @@ serve(async (req: Request) => {
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
-  const credIdBytes = base64UrlToBytes(user.passkey_credential_id);
 
-  // Validate WebAuthn response
+  // v13 API: credential (id, publicKey, counter), not authenticator
+  const publicKeyBytes = new Uint8Array(JSON.parse(user.passkey_public_key));
   let verification;
   try {
     verification = await verifyAuthenticationResponse({
@@ -101,14 +101,16 @@ serve(async (req: Request) => {
       expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpId,
-      authenticator: {
-        credentialPublicKey: new Uint8Array(JSON.parse(user.passkey_public_key)),
-        credentialID: credIdBytes,
+      credential: {
+        id: user.passkey_credential_id,
+        publicKey: publicKeyBytes,
         counter: 0,
+        transports: [],
       },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: "WebAuthn validation failed: " + error.message }), {
+    const msg = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: "WebAuthn validation failed: " + msg }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
