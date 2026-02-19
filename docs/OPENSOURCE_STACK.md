@@ -41,18 +41,31 @@ This document describes the technologies and patterns used in MLS-Chat for contr
 
 ## Supabase Edge Functions (Deno)
 
-| Function        | Purpose |
-|----------------|--------|
-| `auth_challenge` | Creates and stores a WebAuthn challenge for register or login. |
-| `auth_register`  | Verifies WebAuthn registration, creates user + device, stores passkey. |
-| `auth_login`     | Verifies WebAuthn authentication, returns auth token and device MLS keys. |
-| `auth_keypackage` | MLS key package upload/lookup for group join. |
-| `group_create`    | Creates a group on the server (groups, group_members, group_seq) so the creator can send messages. |
-| `ds_send`        | WebSocket endpoint for message delivery (MLS ciphertext). |
+| Function         | Method   | Purpose |
+|------------------|----------|--------|
+| `auth_challenge` | POST     | Creates and stores a WebAuthn challenge for register or login. |
+| `auth_register`  | POST     | Verifies WebAuthn registration, creates user + device, stores passkey. |
+| `auth_login`     | POST     | Verifies WebAuthn authentication, returns auth token and device MLS keys. |
+| `auth_keypackage`| POST     | MLS key package upload/lookup for group join. |
+| `group_create`   | POST     | Creates a group (groups, group_members, group_seq) so the creator can send messages. |
+| `group_join`     | POST     | Registers the caller as a group member (insert into group_members) after MLS join. |
+| `get_messages`   | POST     | Returns message history for a group; requires group_id, user_id, device_id; membership checked. |
+| `ds_send`        | WebSocket| Message delivery: subscribe, send, ack, deliver (MLS ciphertext). |
 
-- **Runtime**: Deno. HTTP via `serve()` from `deno.land/std`.
+- **Runtime**: Deno. HTTP via `serve()` from `deno.land/std`; `ds_send` uses `Deno.upgradeWebSocket()`.
 - **DB**: Supabase client with `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS).
 - **CORS**: Handled in `_shared/cors.ts`; preflight and response headers set per request.
+
+### Edge Functions API reference
+
+- **auth_challenge** — POST. Body: `{ action: "register" | "login", name_or_id?: string }`. Returns `{ challenge_id, challenge }`.
+- **auth_register** — POST. Body: WebAuthn registration response + `user_id`, `device_id`. Creates user and device, returns auth token.
+- **auth_login** — POST. Body: `{ challenge_id, user_id, device_id }` + WebAuthn get response. Returns auth token and MLS keys.
+- **auth_keypackage** — POST. Body: key package payload. Used for MLS join flow (key package lookup).
+- **group_create** — POST. Body: `{ group_id, user_id, device_id, name?, ... }`. Inserts into groups, group_members, group_seq.
+- **group_join** — POST. Body: `{ group_id, user_id, device_id }`. Verifies user/device, inserts into group_members. Call after client processes Welcome and before subscribing.
+- **get_messages** — POST. Body: `{ group_id, user_id, device_id }`. Verifies membership, returns `{ messages: [{ server_seq, server_time, sender_id, device_id, msg_kind, mls_bytes }, ...] }` ordered by server_seq.
+- **ds_send** — WebSocket. Messages: `subscribe` (user_id, device_id, groups, auth), `send` (group_id, sender_id, device_id, msg_kind, mls_bytes, client_seq), ping/pong. Server sends: `subscribed`, `ack`, `deliver`, `error`.
 
 ---
 
@@ -112,9 +125,59 @@ MLS internal group id (hex from WASM) is used only inside the client for `encryp
 ## Client
 
 - **React** + **Vite**, **TypeScript**.
-- **MLS**: Rust crate compiled to WASM (`client/src/mls/wasm`), OpenMLS-based. Keys and state in IndexedDB.
-- **Auth**: Browser Web Authn API; calls to `auth_challenge`, `auth_register`, `auth_login`. No passwords.
-- **Env**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (and optionally `VITE_WS_URL` for WebSocket). See `client/.env.example` if present.
+- **MLS**: Rust crate compiled to WASM (`client/src/mls/wasm`), OpenMLS 0.7-based. Full MLS state persisted in IndexedDB; groups survive page reloads.
+- **Auth**: Browser WebAuthn API; calls to `auth_challenge`, `auth_register`, `auth_login`. No passwords.
+- **Env**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (and optionally `VITE_WS_URL`). See `client/.env.example`.
+
+### MLS WASM module (`client/src/mls/wasm`)
+
+The MLS cryptographic layer is a Rust crate (`mls-wasm`) compiled to WebAssembly with `wasm-pack`. It wraps [OpenMLS 0.7](https://github.com/openmls/openmls) and exposes the following functions to TypeScript:
+
+| WASM function | Purpose |
+|---|---|
+| `create_group(identity)` | Creates a new MLS group; writes state to the shared backend |
+| `process_welcome(welcome, kp_ref)` | Joins a group from a Welcome message |
+| `add_member(group_id, key_package)` | Adds a member; returns Commit + Welcome |
+| `apply_commit(group_id, commit)` | Applies a received Commit to advance the epoch |
+| `encrypt(group_id, plaintext)` | Encrypts a message for the group |
+| `decrypt(group_id, ciphertext)` | Decrypts a received message |
+| `generate_key_package(identity)` | Generates a KeyPackage for joining a group |
+| `export_state()` | Serializes full MLS state (storage + signer) as JSON |
+| `import_state(json)` | Restores previously exported MLS state |
+| `load_group(group_id_hex)` | Loads a group from restored storage into memory |
+
+#### Architecture: shared backend
+
+All WASM operations share a single `OpenMlsRustCrypto` backend (thread-local `BACKEND`). Every group operation writes to its `MemoryStorage`, so the storage accumulates all group state. This enables full serialization via `export_state` / `import_state`.
+
+The signer (`SignatureKeyPair`) is created once per WASM session and cached. It is included in the exported state so the same keypair is restored across page reloads (required for credential consistency in MLS leaf nodes).
+
+#### Cross-session persistence
+
+On every important operation the TypeScript layer calls `mlsClient.exportState()` and saves the JSON blob to IndexedDB (`wasm_state` store, keyed by `userId`). On app startup, saved state is restored with `importState` + `loadGroup` for each known group.
+
+Operations that trigger a state save:
+- `createGroup` (group creation)
+- `processWelcome` (joining via invite)
+- `addMember` (invite generation)
+- `applyCommit` (epoch advances)
+- Bulk history decryption (ratchet advances)
+
+#### IndexedDB stores (`MlsChatGroups`, version 3)
+
+| Store | Key | Contents |
+|---|---|---|
+| `groups` | `id` (app UUID) | Group metadata: `id`, `groupId` (MLS hex), `epoch`, `epochAuthenticator`, `lastUpdated` |
+| `wasm_state` | `userId` | Full exported WASM state JSON: storage values (hex-encoded key-value map) + serialized signer |
+
+#### Building the WASM module
+
+```bash
+cd client/src/mls/wasm
+wasm-pack build --target web --out-dir pkg
+```
+
+Requires Rust toolchain + `wasm-pack` (`cargo install wasm-pack`). The built `pkg/` is checked in so contributors who only work on TypeScript/UI don't need Rust.
 
 ---
 

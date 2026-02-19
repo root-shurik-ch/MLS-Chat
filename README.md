@@ -58,11 +58,12 @@ All MLS operations (encryption, key management) happen client-side. Servers only
    - Create a Supabase project
    - Set environment variables in `.env`
 
-3. **Build WASM:**
+3. **Build WASM** (requires Rust + `wasm-pack`):
    ```bash
-   cd src/mls
-   # Build MLS WASM library
+   cd client/src/mls/wasm
+   wasm-pack build --target web --out-dir pkg
    ```
+   Skip if you only work on TypeScript/UI — the built `pkg/` is checked in.
 
 4. **Run locally:**
    ```bash
@@ -75,43 +76,44 @@ For detailed setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The project follows a phased implementation plan:
 
-### Phase 1: Core Infrastructure (High Priority)
+### Phase 1: Core Infrastructure
 
-1. **MLS WASM Implementation**
-   - WASM library for MLS operations
-   - Client-side state management in IndexedDB
+1. **MLS WASM Implementation** ✅
+   - OpenMLS 0.7 compiled to WebAssembly (`wasm-pack`)
+   - Shared backend (single `OpenMlsRustCrypto` instance per session)
+   - Full state persistence in IndexedDB — groups and epoch secrets survive page reloads
+   - `export_state` / `import_state` / `load_group` for cross-session restore
 
-2. **Web Client UI**
-   - React/Vue SPA with mobile support
-   - WebAuthn mandatory authentication
+2. **Web Client UI** ✅
+   - React + Vite SPA
+   - WebAuthn-only authentication
 
-3. **Authentication Service** ✅ (registration and login work)
-   - Supabase Edge Function for WebAuthn registration/login
-   - Secure storage of encrypted private keys
+3. **Authentication Service** ✅
+   - Supabase Edge Functions for WebAuthn registration/login
+   - SimpleWebAuthn v13 (Deno-compatible)
 
-4. **Delivery Service**
-   - WebSocket-based message delivery
-   - Server sequence numbering
+4. **Delivery Service** ✅
+   - WebSocket (`ds_send` Edge Function)
+   - Server sequence numbering and message history (`get_messages`)
 
-5. **WebAuthn Integration** ✅ (passkey registration and login)
-   - PRF-based key derivation
-   - Cross-device compatibility
+5. **WebAuthn Integration** ✅
+   - Passkey registration and login
+   - Cross-device support
 
-### Phase 2: Polish and Testing (Medium Priority)
+### Phase 2: Polish and Testing
 
-6. **Database Schema**
-   - Optimized tables with RLS policies
+6. **Database Schema** ✅
+   - Tables: `users`, `devices`, `challenges`, `groups`, `group_members`, `group_seq`, `messages`
+   - RLS policies (in progress)
 
 7. **E2E Testing & Security Audit**
    - Comprehensive test suite
    - Third-party security review
 
-### Phase 3: Launch (Low Priority)
+### Phase 3: Launch
 
 8. **Documentation & Deployment**
    - Complete docs and CI/CD setup
-
-See [.opencode/tasks/final-implementation.md](.opencode/tasks/final-implementation.md) for detailed task breakdown.
 
 ## Documentation
 

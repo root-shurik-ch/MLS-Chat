@@ -54,11 +54,16 @@ Before contributing, familiarize yourself with:
    - Copy `.env.example` to `.env` and fill in your Supabase credentials
    - Run migrations: `supabase db push`
 
-4. **Build WASM modules:**
+4. **Build WASM modules** (only needed if you modify Rust code in `client/src/mls/wasm/src/`):
    ```bash
-   cd client/src/mls
-   # Build WASM library (specific commands depend on implementation)
+   # Install wasm-pack if not already installed
+   cargo install wasm-pack
+
+   cd client/src/mls/wasm
+   wasm-pack build --target web --out-dir pkg
    ```
+   The compiled `pkg/` is checked into the repository, so contributors working
+   only on TypeScript or UI can skip this step.
 
 5. **Start development server:**
    ```bash
@@ -70,9 +75,11 @@ Before contributing, familiarize yourself with:
 
 ### WASM and MLS
 
-- MLS cryptography is handled in WASM for performance and security
-- State (trees, keys, history) is stored client-side in IndexedDB
-- Use the TypeScript wrapper in `client/src/mls/` for integration
+- MLS cryptography is handled in WASM (`client/src/mls/wasm/`, Rust/OpenMLS 0.7)
+- A single shared `OpenMlsRustCrypto` backend is used per WASM session so all group state accumulates in one `MemoryStorage`
+- State (epoch secrets, message ratchet, signer) is serialized with `export_state()` and persisted to IndexedDB (`wasm_state` store) after each important operation
+- On startup, `import_state()` + `load_group()` restore all groups so decryption works across page reloads
+- TypeScript wrapper in `client/src/mls/index.ts` (`MlsClient` class); never call WASM functions directly from components
 
 ### Supabase
 
