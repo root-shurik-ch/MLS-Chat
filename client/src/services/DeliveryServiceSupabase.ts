@@ -6,7 +6,7 @@ import { WebSocketManager, ConnectionState, type WebSocketMessage } from '../uti
 
 interface PendingAck {
   clientSeq: number;
-  resolve: () => void;
+  resolve: (serverSeq: number) => void;
   reject: (error: Error) => void;
   timeout: number;
 }
@@ -125,7 +125,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
     msgKind: MsgKind;
     mlsBytes: string;
     clientSeq: number;
-  }): Promise<void> {
+  }): Promise<number> {
     // Check if online and connected
     if (!navigator.onLine || !this.wsManager || !this.wsManager.isConnected()) {
       console.log('Offline or not connected - queuing message');
@@ -137,11 +137,11 @@ export class DeliveryServiceSupabase implements DeliveryService {
         mlsBytes: msg.mlsBytes,
         clientSeq: msg.clientSeq,
       });
-      return;
+      return 0;
     }
 
-    // Send with acknowledgment
-    return new Promise((resolve, reject) => {
+    // Send with acknowledgment — resolves with the server_seq from the ack
+    return new Promise<number>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         this.pendingAcks.delete(msg.clientSeq);
         reject(new Error('Message acknowledgment timeout'));
@@ -300,7 +300,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
       this.pendingAcks.delete(clientSeq);
 
       if (message.success) {
-        pendingAck.resolve();
+        pendingAck.resolve(message.server_seq ?? 0);
       } else {
         pendingAck.reject(new Error(message.error || 'Send failed'));
       }

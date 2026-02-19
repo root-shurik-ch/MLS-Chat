@@ -4,7 +4,7 @@ import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase'
 import { MlsClient, MlsGroup } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
 import InviteLink from '../Group/InviteLink';
-import { saveWasmState } from '../../utils/mlsGroupStorage';
+import { saveWasmState, saveSentMessage, getSentMessage } from '../../utils/mlsGroupStorage';
 
 interface ChatProps {
   userId: string;
@@ -88,14 +88,14 @@ const Chat: React.FC<ChatProps> = ({
             });
           } catch (e) {
             if (String(e).includes('CannotDecryptOwnMessage')) {
-              // MLS senders cannot decrypt their own ciphertext — this device's
-              // leaf node was the encryptor. Show a placeholder regardless of
-              // which device_id sent it (multi-device may share the same MLS state).
+              // MLS senders cannot decrypt their own ciphertext.
+              // Look up the cached plaintext saved at send time.
+              const cached = await getSentMessage(groupId, m.server_seq).catch(() => null);
               parsed.push({
                 id: `msg_${m.server_seq}`,
                 senderId: m.sender_id,
                 deviceId: m.device_id,
-                text: '(your message — text only available in the session it was sent)',
+                text: cached ?? '(your message — text unavailable on this device)',
                 timestamp: ts,
                 serverSeq: m.server_seq,
                 isSent: true,
@@ -249,7 +249,7 @@ const Chat: React.FC<ChatProps> = ({
 
       // Send via WebSocket (use app group id = UUID, not MLS internal groupId)
       console.log('Sending message via WebSocket, seq:', currentSeq);
-      await deliveryService.send({
+      const serverSeq = await deliveryService.send({
         groupId,
         senderId: userId,
         deviceId: deviceId,
@@ -258,11 +258,18 @@ const Chat: React.FC<ChatProps> = ({
         clientSeq: currentSeq,
       });
 
+      // Cache plaintext so it's available in history after page reload
+      // (MLS senders cannot decrypt their own ciphertext)
+      if (serverSeq > 0) {
+        saveSentMessage(groupId, serverSeq, text, userId, deviceId, Date.now())
+          .catch(e => console.warn('Failed to cache sent message:', e));
+      }
+
       // Remove pending flag on success
       setMessages(prev =>
         prev.map(m =>
           m.id === pendingId
-            ? { ...m, isPending: false }
+            ? { ...m, isPending: false, serverSeq: serverSeq > 0 ? serverSeq : undefined }
             : m
         )
       );

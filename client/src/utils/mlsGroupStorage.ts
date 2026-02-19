@@ -4,7 +4,8 @@ import type { MlsGroup } from '../mls/index';
 const DB_NAME = 'MlsChatGroups';
 const STORE_NAME = 'groups';
 const STATE_STORE = 'wasm_state';
-const DB_VERSION = 3; // v3: added wasm_state store
+const SENT_MESSAGES_STORE = 'sent_messages';
+const DB_VERSION = 4; // v4: added sent_messages store
 
 export interface StoredMlsGroup extends MlsGroup {
   lastUpdated: number; // timestamp
@@ -40,6 +41,11 @@ async function openDB(): Promise<IDBDatabase> {
       if (oldVersion < 3) {
         // wasm_state store: one record per userId
         db.createObjectStore(STATE_STORE, { keyPath: 'userId' });
+      }
+      if (oldVersion < 4) {
+        // sent_messages store: cache plaintext of sent messages so they can
+        // be shown in history after reload (MLS senders can't decrypt own ciphertext)
+        db.createObjectStore(SENT_MESSAGES_STORE, { keyPath: 'id' });
       }
     };
   });
@@ -172,5 +178,47 @@ export async function deleteWasmState(userId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ * Cache plaintext of a sent message so it can be shown in history after reload.
+ * Key: `${groupId}:${serverSeq}` — both fields come from the server ack.
+ */
+export async function saveSentMessage(
+  groupId: string,
+  serverSeq: number,
+  text: string,
+  senderId: string,
+  deviceId: string,
+  timestamp: number,
+): Promise<void> {
+  const db = await openDB();
+  const transaction = db.transaction([SENT_MESSAGES_STORE], 'readwrite');
+  const store = transaction.objectStore(SENT_MESSAGES_STORE);
+  store.put({ id: `${groupId}:${serverSeq}`, groupId, serverSeq, text, senderId, deviceId, timestamp });
+
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ * Look up a cached sent message by group and server sequence number.
+ * Returns the plaintext string, or null if not cached.
+ */
+export async function getSentMessage(groupId: string, serverSeq: number): Promise<string | null> {
+  const db = await openDB();
+  const transaction = db.transaction([SENT_MESSAGES_STORE], 'readonly');
+  const store = transaction.objectStore(SENT_MESSAGES_STORE);
+  const request = store.get(`${groupId}:${serverSeq}`);
+
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      const record = request.result;
+      resolve(record ? (record.text as string) : null);
+    };
+    request.onerror = () => reject(request.error);
   });
 }
