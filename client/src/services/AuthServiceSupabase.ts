@@ -43,9 +43,9 @@ export class AuthServiceSupabase implements AuthService {
 
   async register(input: {
     challengeId: string;
+    /** Same as display name: human-readable unique name chosen by user */
     userId: string;
     deviceId: string;
-    displayName: string;
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
     webauthnCreateResponse: Record<string, unknown>;
@@ -60,7 +60,6 @@ export class AuthServiceSupabase implements AuthService {
         challenge_id: input.challengeId,
         user_id: input.userId,
         device_id: input.deviceId,
-        display_name: input.displayName,
         mls_public_key: input.mlsPublicKey,
         mls_private_key_enc: input.mlsPrivateKeyEnc,
         webauthn_create_response: input.webauthnCreateResponse,

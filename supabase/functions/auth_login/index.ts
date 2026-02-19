@@ -65,7 +65,7 @@ serve(async (req: Request) => {
 
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("user_id, passkey_credential_id, passkey_public_key")
+    .select("user_id, passkey_credential_id, passkey_public_key, avatar_url")
     .eq("user_id", user_id)
     .single();
 

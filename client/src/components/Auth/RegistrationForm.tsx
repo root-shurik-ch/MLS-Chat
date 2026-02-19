@@ -52,6 +52,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         return;
       }
 
+      // user_id = chosen display name (unique, no separate random id)
       const userId = displayName.trim();
       if (userId.length === 0) {
         setError('Name is required');
@@ -93,7 +94,6 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         challengeId,
         userId,
         deviceId,
-        displayName: userId,
         mlsPublicKey: encodeBase64Url(mlsPublicKey),
         mlsPrivateKeyEnc,
         webauthnCreateResponse,

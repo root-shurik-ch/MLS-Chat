@@ -17,7 +17,6 @@ export interface AuthService {
     challengeId: string;
     userId: string;
     deviceId: string;
-    displayName: string;
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
     webauthnCreateResponse: Record<string, unknown>;

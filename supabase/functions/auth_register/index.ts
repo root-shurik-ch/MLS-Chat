@@ -124,7 +124,11 @@ serve(async (req: Request) => {
     id,
     rawId: typeof rawId === "string" ? rawId : id,
     type: r.type === "public-key" ? "public-key" : "public-key",
-    response: { clientDataJSON, attestationObject },
+    response: {
+      clientDataJSON,
+      attestationObject,
+      transports: Array.isArray(r.response?.transports) ? r.response.transports : [],
+    },
   };
 
   // Get challenge from db
@@ -171,7 +175,8 @@ serve(async (req: Request) => {
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error("[auth_register] WebAuthn validation failed:", msg, "expectedOrigin=" + origin, "expectedRPID=" + rpId);
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error("[auth_register] WebAuthn validation failed:", msg, "expectedOrigin=" + origin, "expectedRPID=" + rpId, stack ?? "");
     return new Response(JSON.stringify({ error: "WebAuthn validation failed: " + msg }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
