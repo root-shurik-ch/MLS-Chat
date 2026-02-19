@@ -75,14 +75,25 @@ export class MlsClient {
   async generateKeyPackage(): Promise<KeyPackage> {
     await this.init()
 
+    if (!this.credentialIdentity?.length) {
+      throw new Error('MLS client credential identity not initialized')
+    }
+
     try {
       const result = generate_key_package(this.credentialIdentity)
+      if (!result || typeof result !== 'object') {
+        throw new Error('Key package generation returned invalid result')
+      }
+      const data = result.data
+      if (typeof data !== 'string' || data.length === 0) {
+        throw new Error('Key package generation returned missing or empty data')
+      }
       const keyPackage: KeyPackage = {
-        data: result.data,
-        signature: result.signature,
-        hpkePublicKey: result.hpke_public_key,
-        credential: result.credential,
-        extensions: result.extensions
+        data,
+        signature: result.signature ?? '',
+        hpkePublicKey: result.hpke_public_key ?? '',
+        credential: result.credential ?? '',
+        extensions: result.extensions ?? {}
       }
       return keyPackage
     } catch (error) {
@@ -94,9 +105,18 @@ export class MlsClient {
   async addMember(group: MlsGroup, keyPackage: KeyPackage): Promise<Commit> {
     await this.init()
 
+    const groupIdHex = group?.groupId
+    const keyPackageData = keyPackage?.data
+    if (typeof groupIdHex !== 'string' || groupIdHex.length === 0) {
+      throw new Error('Invalid group: missing or empty groupId (MLS group id required)')
+    }
+    if (typeof keyPackageData !== 'string' || keyPackageData.length === 0) {
+      throw new Error('Invalid key package: missing or empty data')
+    }
+
     try {
       // Call real WASM add_member function
-      const result = add_member(group.groupId, keyPackage.data)
+      const result = add_member(groupIdHex, keyPackageData)
       const commitData = JSON.parse(result)
 
       return {

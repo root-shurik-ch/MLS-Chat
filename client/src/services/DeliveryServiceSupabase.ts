@@ -266,6 +266,10 @@ export class DeliveryServiceSupabase implements DeliveryService {
         this.handleError(message);
         break;
 
+      case 'subscribed':
+        // Handled in subscribe() one-time listener; ignore here
+        break;
+
       default:
         console.log('Unknown message type:', message.type);
     }

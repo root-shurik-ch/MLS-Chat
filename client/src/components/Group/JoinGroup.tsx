@@ -53,7 +53,7 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
 
       const keyPackage = await mlsClient.generateKeyPackage();
       console.log('Processing Welcome message...');
-      const mlsGroup = await mlsClient.processWelcome(welcome, keyPackage.ref);
+      const mlsGroup = await mlsClient.processWelcome(welcome, keyPackage);
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       if (!supabaseUrl) {
