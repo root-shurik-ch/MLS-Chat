@@ -8,8 +8,9 @@ import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
 import { loadAllMlsGroups, saveMlsGroup } from './utils/mlsGroupStorage';
+import UIShowcase from './pages/UIShowcase';
 
-type AppView = 'auth' | 'groups' | 'chat';
+type AppView = 'auth' | 'groups' | 'chat' | 'ui';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('auth');
@@ -40,8 +41,14 @@ const App: React.FC = () => {
         deliveryServiceRef.current = new DeliveryServiceSupabase();
       }
 
-      // Connect to WebSocket
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:54321/functions/v1/ds_send';
+      // Connect to WebSocket (use Supabase host when VITE_WS_URL not set, so production works)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const wsUrl = import.meta.env.VITE_WS_URL || (supabaseUrl
+        ? (() => {
+            const u = new URL(supabaseUrl);
+            return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send';
+          })()
+        : 'ws://localhost:54321/functions/v1/ds_send');
       const authToken = {
         value: localStorage.getItem('authToken') || `temp_token_${userId}`,
         expiresAt: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
@@ -179,6 +186,11 @@ const App: React.FC = () => {
         )}
         <RegistrationForm onSuccess={handleAuthSuccess} />
         <LoginForm onSuccess={handleAuthSuccess} />
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => setView('ui')} style={{ padding: '8px 12px', borderRadius: 4, border: '1px solid #555', background: '#111', color: '#fff' }}>
+            UI Showcase
+          </button>
+        </div>
         <p style={{ marginTop: 24, fontSize: 12, color: '#888' }}>v{__APP_VERSION__}</p>
       </div>
     );
@@ -208,6 +220,11 @@ const App: React.FC = () => {
         </div>
       </>
     );
+  }
+
+  // UI Showcase route for design system verification
+  if (view === 'ui') {
+    return <UIShowcase />;
   }
 
   // Chat view

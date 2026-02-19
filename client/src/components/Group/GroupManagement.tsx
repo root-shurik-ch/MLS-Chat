@@ -57,21 +57,25 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     onSelectGroup(groupId);
   };
 
-  const handleJoinSuccess = (groupId: string) => {
+  const handleJoinSuccess = async (groupId: string) => {
     const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]') as GroupMeta[];
     const groupExists = storedGroups.some((g: GroupMeta) => g.groupId === groupId);
     if (!groupExists) {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const dsUrl = import.meta.env.VITE_WS_URL || (supabaseUrl
+        ? (() => { const u = new URL(supabaseUrl); return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send'; })()
+        : 'ws://localhost:54321/functions/v1/ds_send');
       storedGroups.push({
         groupId,
         name: `Group ${groupId.substring(0, 8)}`,
-        dsUrl: 'ws://localhost:54321/functions/v1/ds_send',
+        dsUrl,
         currentEpoch: 0,
       });
       localStorage.setItem('groups', JSON.stringify(storedGroups));
     }
 
     setShowJoinForm(false);
-    loadGroups();
+    await loadGroups();
     onSelectGroup(groupId);
   };
 

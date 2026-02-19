@@ -69,6 +69,46 @@ Schema is in `supabase/apply_schema.sql` (and migrations under `supabase/migrati
 
 ---
 
+## Message flow (how messages are sent and delivered)
+
+All message traffic goes over a single WebSocket to the `ds_send` Edge Function. The **group id** used in the protocol and in the database is the **app group id** (UUID), e.g. from `group_create` or the group list. The MLS layer uses an internal group id (hex) only for encrypt/decrypt; the client must send the **UUID** to the server so it can look up `group_members` and store in `messages`.
+
+### 1. Group creation (required before sending)
+
+- Client creates an MLS group in WASM and calls `group_create` with `group_id` (UUID), `user_id`, `device_id`, `name`, etc.
+- Server inserts into `groups`, `group_members` (with that `device_id`), and `group_seq` (initial sequence). Only then can this device send messages in that group.
+
+### 2. Subscribe
+
+- Client opens a WebSocket to `ds_send` and sends `{ type: "subscribe", user_id, device_id, groups: [group_id, ...], auth }`.
+- Server checks `users` and `devices`, then subscribes the socket to Realtime channels for each `group_id`. All subsequent send/deliver use the same `group_id` (UUID).
+
+### 3. Send message
+
+- Client encrypts with MLS (using the MLS group state keyed by internal id) and calls DeliveryService `send({ groupId, senderId, deviceId, msgKind, mlsBytes, clientSeq })`. **`groupId` must be the app UUID**, not `mlsGroup.groupId` (hex).
+- Over the wire: `{ type: "send", group_id, sender_id, device_id, msg_kind, mls_bytes, client_seq }`.
+- Server (`ds_send`): verifies socket is authenticated and `sender_id`/`device_id` match; checks `group_members` for this `group_id` and `device_id`; calls RPC `send_message(p_group_id, p_sender_id, p_device_id, p_msg_kind, p_mls_bytes)` where sender/device ids are **device_id** (table `messages` references `devices(device_id)`).
+- RPC `send_message`: increments `group_seq.last_server_seq` for that `group_id`, inserts into `messages`, returns `server_seq` and `server_time`.
+- Server sends back `{ type: "ack", client_seq, server_seq, success: true }` and broadcasts `{ type: "deliver", group_id, server_seq, server_time, sender_id, device_id, msg_kind, mls_bytes }` on the group’s Realtime channel so other subscribers receive it.
+
+### 4. Receive message
+
+- Subscribed clients get the `deliver` payload on the WebSocket. They decrypt `mls_bytes` with their MLS group state and display the message. The sender usually does not process their own deliver (they already have the message from the ack).
+
+### Summary
+
+| Step        | Where        | group_id / id meaning                          |
+|------------|--------------|-------------------------------------------------|
+| group_create | Server       | UUID in `groups`, `group_members`, `group_seq` |
+| subscribe  | Client → DS  | `groups`: list of UUIDs                         |
+| send       | Client → DS  | `group_id`: UUID (same as in subscribe)        |
+| send_message RPC | Server  | `p_group_id`: UUID                              |
+| deliver    | DS → Client  | `group_id`: UUID                                |
+
+MLS internal group id (hex from WASM) is used only inside the client for `encrypt`/`decrypt`; it is never sent to the server.
+
+---
+
 ## Client
 
 - **React** + **Vite**, **TypeScript**.

@@ -2,6 +2,8 @@
 
 DeliveryService (DS) is a minimal, mostly stateless message router for MLS ciphertext. It assigns an ordered `server_seq` per `group_id` and delivers messages to subscribed clients. DS never decrypts `mls_bytes`.
 
+**Group id**: Everywhere in this protocol (subscribe, send, deliver), `group_id` is the **server/app group id** (UUID), i.e. the id stored in `groups` and `group_members`. The client must not send the MLS internal group id (hex from WASM); the server looks up membership and stores messages by UUID.
+
 ## WebSocket Messages
 
 ### Subscribe
