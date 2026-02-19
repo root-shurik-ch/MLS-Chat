@@ -100,7 +100,8 @@ serve(async (req: Request) => {
 
   if (memberError) {
     console.error("[group_create] group_members insert error:", memberError);
-    await supabase.from("groups").delete().eq("group_id", groupId);
+    const { error: delErr } = await supabase.from("groups").delete().eq("group_id", groupId);
+    if (delErr) console.error("[group_create] rollback: groups delete failed:", delErr);
     return new Response(JSON.stringify({ error: memberError.message }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
@@ -114,8 +115,13 @@ serve(async (req: Request) => {
 
   if (seqError) {
     console.error("[group_create] group_seq insert error:", seqError);
-    await supabase.from("group_members").delete().eq("group_id", groupId);
-    await supabase.from("groups").delete().eq("group_id", groupId);
+    const { error: delMembersErr } = await supabase
+      .from("group_members")
+      .delete()
+      .eq("group_id", groupId);
+    if (delMembersErr) console.error("[group_create] rollback: group_members delete failed:", delMembersErr);
+    const { error: delGroupsErr } = await supabase.from("groups").delete().eq("group_id", groupId);
+    if (delGroupsErr) console.error("[group_create] rollback: groups delete failed:", delGroupsErr);
     return new Response(JSON.stringify({ error: seqError.message }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },

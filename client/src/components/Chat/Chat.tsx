@@ -150,10 +150,10 @@ const Chat: React.FC<ChatProps> = ({
       console.log('Encrypting message with MLS');
       const mlsBytes = await mlsClient.encryptMessage(mlsGroup, text);
 
-      // Send via WebSocket
+      // Send via WebSocket (use app group id = UUID, not MLS internal groupId)
       console.log('Sending message via WebSocket, seq:', currentSeq);
       await deliveryService.send({
-        groupId: mlsGroup.groupId,
+        groupId,
         senderId: userId,
         deviceId: deviceId,
         msgKind: 'chat' as MsgKind,

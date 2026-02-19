@@ -58,10 +58,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   };
 
   const handleJoinSuccess = (groupId: string) => {
-    // Reload groups from localStorage
-    const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-
-    // Add the joined group if not already present
+    const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]') as GroupMeta[];
     const groupExists = storedGroups.some((g: GroupMeta) => g.groupId === groupId);
     if (!groupExists) {
       storedGroups.push({
@@ -73,10 +70,8 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       localStorage.setItem('groups', JSON.stringify(storedGroups));
     }
 
-    setGroups(storedGroups);
     setShowJoinForm(false);
-
-    // Automatically open the joined group
+    loadGroups();
     onSelectGroup(groupId);
   };
 
