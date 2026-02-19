@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifyAuthenticationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
 import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
+import { base64UrlToBytes } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -66,13 +67,21 @@ serve(async (req: Request) => {
     });
   }
 
-  // Decode challenge
-  const expectedChallenge = Uint8Array.from(atob(challengeData.challenge), c => c.charCodeAt(0));
+  const expectedChallenge = challengeData.challenge;
+  if (typeof expectedChallenge !== "string" || expectedChallenge.trim() === "") {
+    return new Response(JSON.stringify({ error: "Invalid challenge data" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
 
-  const credIdRaw = user.passkey_credential_id;
-  const credIdBytes = typeof credIdRaw === "string" && /^[A-Za-z0-9+/=]+$/.test(credIdRaw)
-    ? Uint8Array.from(atob(credIdRaw), (c) => c.charCodeAt(0))
-    : new Uint8Array(JSON.parse(credIdRaw));
+  if (typeof user.passkey_credential_id !== "string" || user.passkey_credential_id.trim() === "") {
+    return new Response(JSON.stringify({ error: "Invalid credential data" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  const credIdBytes = base64UrlToBytes(user.passkey_credential_id);
 
   // Validate WebAuthn response
   let verification;

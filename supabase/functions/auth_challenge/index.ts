@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, handleCorsPreflight } from "../../_shared/cors.ts";
+import { bytesToBase64Url } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -25,7 +26,7 @@ serve(async (req: Request) => {
   }
 
   const challengeBytes = crypto.getRandomValues(new Uint8Array(32));
-  const challenge = btoa(String.fromCharCode(...challengeBytes));
+  const challenge = bytesToBase64Url(challengeBytes);
   const challengeId = crypto.randomUUID();
 
   const { error } = await supabase

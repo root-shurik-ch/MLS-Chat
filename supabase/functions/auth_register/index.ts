@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifyRegistrationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
 import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
+import { bytesToBase64Url } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -121,8 +122,8 @@ serve(async (req: Request) => {
     });
   }
 
-  const challengeB64 = challengeData.challenge;
-  if (typeof challengeB64 !== "string" || challengeB64.trim() === "") {
+  const expectedChallenge = challengeData.challenge;
+  if (typeof expectedChallenge !== "string" || expectedChallenge.trim() === "") {
     console.error("[auth_register] Invalid challenge in DB: not a non-empty string");
     return new Response(JSON.stringify({ error: "Invalid challenge data" }), {
       status: 400,
@@ -130,19 +131,7 @@ serve(async (req: Request) => {
     });
   }
 
-  // Decode challenge (stored as base64)
-  let expectedChallenge: Uint8Array;
-  try {
-    expectedChallenge = Uint8Array.from(atob(challengeB64), c => c.charCodeAt(0));
-  } catch (e) {
-    console.error("[auth_register] Challenge decode error:", e);
-    return new Response(JSON.stringify({ error: "Invalid challenge encoding" }), {
-      status: 400,
-      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
-    });
-  }
-
-  // Validate WebAuthn response
+  // Challenge is stored and sent to client as base64url; pass as-is to library
   let verification;
   try {
     verification = await verifyRegistrationResponse({
@@ -169,7 +158,7 @@ serve(async (req: Request) => {
   }
 
   const credId = verification.registrationInfo!.credentialID;
-  const credIdStr = typeof credId === "string" ? credId : btoa(String.fromCharCode(...new Uint8Array(credId)));
+  const credIdStr = bytesToBase64Url(new Uint8Array(credId));
   const credPk = verification.registrationInfo!.credentialPublicKey;
 
   // Insert user (users table: user_id, display_name, avatar_url, passkey_credential_id, passkey_public_key)
