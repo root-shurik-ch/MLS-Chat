@@ -16,13 +16,30 @@ serve(async (req: Request) => {
   }
 
   const body = await req.json();
-  const { action } = body;
+  const { action, name_or_id } = body;
 
   if (!["register", "login"].includes(action)) {
     return new Response(JSON.stringify({ error: "Invalid action" }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
+  }
+
+  let resolvedUserId: string | undefined;
+  if (action === "login" && typeof name_or_id === "string" && name_or_id.trim() !== "") {
+    const inputTrimmed = name_or_id.trim();
+    const { data: row } = await supabase
+      .from("users")
+      .select("user_id")
+      .eq("user_id", inputTrimmed)
+      .maybeSingle();
+    if (!row) {
+      return new Response(JSON.stringify({ error: "User not found" }), {
+        status: 404,
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+      });
+    }
+    resolvedUserId = row.user_id;
   }
 
   const challengeBytes = crypto.getRandomValues(new Uint8Array(32));
@@ -45,12 +62,17 @@ serve(async (req: Request) => {
     });
   }
 
-  return new Response(
-    JSON.stringify({
-      challenge_id: challengeId,
-      challenge,
-      ttl: 300000,
-    }),
-    { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
-  );
+  const payload: { challenge_id: string; challenge: string; ttl: number; user_id?: string } = {
+    challenge_id: challengeId,
+    challenge,
+    ttl: 300000,
+  };
+  if (resolvedUserId) {
+    payload.user_id = resolvedUserId;
+  }
+
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+  });
 });

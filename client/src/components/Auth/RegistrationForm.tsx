@@ -14,14 +14,12 @@ import {
   encodeBase64Url,
 } from '../../utils/crypto';
 import { KeyManager } from '../../utils/keyManager';
+
+const NAME_MAX_LENGTH = 64;
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 
 interface RegistrationFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
-}
-
-function generateUserId(): string {
-  return 'user_' + encodeBase64Url(crypto.getRandomValues(new Uint8Array(16)));
 }
 
 const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
@@ -54,7 +52,16 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         return;
       }
 
-      const userId = generateUserId();
+      const userId = displayName.trim();
+      if (userId.length === 0) {
+        setError('Name is required');
+        return;
+      }
+      if (userId.length > NAME_MAX_LENGTH) {
+        setError(`Name must be at most ${NAME_MAX_LENGTH} characters`);
+        return;
+      }
+
       const deviceId = generateDeviceId();
       const authService = new AuthServiceSupabase(baseUrl);
       const keyManager = new KeyManager();
@@ -62,7 +69,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
 
       const { challengeId, challenge } = await authService.getChallenge('register');
 
-      const createResult = await createPasskey(userId, challenge, displayName);
+      const createResult = await createPasskey(userId, challenge, userId);
 
       const { challenge: loginChallenge } = await authService.getChallenge('login');
       const authResult = await authenticatePasskey(
@@ -86,7 +93,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         challengeId,
         userId,
         deviceId,
-        displayName,
+        displayName: userId,
         mlsPublicKey: encodeBase64Url(mlsPublicKey),
         mlsPrivateKeyEnc,
         webauthnCreateResponse,
@@ -116,7 +123,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
       <h2>Register</h2>
       <input
         type="text"
-        placeholder="Display Name"
+        placeholder="Your name (unique, cannot be changed later)"
         value={displayName}
         onChange={(e) => setDisplayName(e.target.value)}
         required

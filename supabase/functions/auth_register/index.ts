@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifyRegistrationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
 import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
-import { bytesToBase64Url } from "../../_shared/webauthn.ts";
+import { bytesToBase64Url, challengeToBase64Url } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -40,9 +40,8 @@ serve(async (req: Request) => {
   const body = await req.json();
   const {
     challenge_id,
-    user_id,
+    user_id: name_input,
     device_id,
-    display_name,
     mls_public_key,
     mls_private_key_enc,
     webauthn_create_response,
@@ -51,6 +50,35 @@ serve(async (req: Request) => {
   if (!challenge_id) {
     return new Response(JSON.stringify({ error: "Missing challenge_id" }), {
       status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+
+  const user_id =
+    typeof name_input === "string" ? name_input.trim() : "";
+  if (user_id.length === 0) {
+    return new Response(JSON.stringify({ error: "Name is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+  if (user_id.length > 64) {
+    return new Response(JSON.stringify({ error: "Name must be at most 64 characters" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+
+  const { data: existing } = await supabase
+    .from("users")
+    .select("user_id")
+    .eq("user_id", user_id)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    return new Response(JSON.stringify({ error: "Name already taken" }), {
+      status: 409,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
@@ -122,8 +150,8 @@ serve(async (req: Request) => {
     });
   }
 
-  const expectedChallenge = challengeData.challenge;
-  if (typeof expectedChallenge !== "string" || expectedChallenge.trim() === "") {
+  const challengeFromDb = challengeData.challenge;
+  if (typeof challengeFromDb !== "string" || challengeFromDb.trim() === "") {
     console.error("[auth_register] Invalid challenge in DB: not a non-empty string");
     return new Response(JSON.stringify({ error: "Invalid challenge data" }), {
       status: 400,
@@ -131,7 +159,8 @@ serve(async (req: Request) => {
     });
   }
 
-  // Challenge is stored and sent to client as base64url; pass as-is to library
+  const expectedChallenge = challengeToBase64Url(challengeFromDb);
+
   let verification;
   try {
     verification = await verifyRegistrationResponse({
@@ -161,12 +190,10 @@ serve(async (req: Request) => {
   const credIdStr = bytesToBase64Url(new Uint8Array(credId));
   const credPk = verification.registrationInfo!.credentialPublicKey;
 
-  // Insert user (users table: user_id, display_name, avatar_url, passkey_credential_id, passkey_public_key)
   const { data: user, error: userError } = await supabase
     .from("users")
     .upsert({
       user_id,
-      display_name,
       avatar_url: null,
       passkey_credential_id: credIdStr,
       passkey_public_key: JSON.stringify(credPk),
@@ -212,7 +239,7 @@ serve(async (req: Request) => {
       auth_token,
       profile: {
         userId: user_id,
-        displayName: display_name,
+        displayName: user_id,
         avatarUrl: null,
       },
     }),

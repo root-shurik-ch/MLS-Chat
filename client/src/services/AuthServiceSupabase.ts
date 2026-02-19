@@ -8,24 +8,36 @@ export class AuthServiceSupabase implements AuthService {
     this.baseUrl = baseUrl;
   }
 
-  async getChallenge(action: 'register' | 'login'): Promise<{
+  async getChallenge(action: 'register' | 'login', nameOrId?: string): Promise<{
     challengeId: string;
     challenge: string;
     ttl: number;
+    userId?: string;
   }> {
+    const body: { action: string; name_or_id?: string } = { action };
+    if (action === 'login' && nameOrId?.trim()) {
+      body.name_or_id = nameOrId.trim();
+    }
     const response = await fetch(`${this.baseUrl}/auth_challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error('Failed to get challenge');
+      const err = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(typeof err.error === 'string' ? err.error : 'Failed to get challenge');
     }
-    const data = await response.json() as { challenge_id: string; challenge: string; ttl: number };
+    const data = await response.json() as {
+      challenge_id: string;
+      challenge: string;
+      ttl: number;
+      user_id?: string;
+    };
     return {
       challengeId: data.challenge_id,
       challenge: data.challenge,
       ttl: data.ttl,
+      userId: data.user_id,
     };
   }
 

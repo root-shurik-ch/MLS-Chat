@@ -6,10 +6,11 @@ export interface AuthToken {
 }
 
 export interface AuthService {
-  getChallenge(action: 'register' | 'login'): Promise<{
+  getChallenge(action: 'register' | 'login', nameOrId?: string): Promise<{
     challengeId: string;
     challenge: string;
     ttl: number;
+    userId?: string;
   }>;
 
   register(input: {

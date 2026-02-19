@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifyAuthenticationResponse } from "https://esm.sh/@simplewebauthn/server@7.2.0";
 import { corsHeaders, getWebAuthnOriginAndRpId, handleCorsPreflight } from "../../_shared/cors.ts";
-import { base64UrlToBytes } from "../../_shared/webauthn.ts";
+import { base64UrlToBytes, challengeToBase64Url } from "../../_shared/webauthn.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -32,7 +32,7 @@ serve(async (req: Request) => {
   }
 
   const body = await req.json();
-  const { challenge_id, user_id, device_id, webauthn_get_response } = body;
+  const { challenge_id, user_id: name_input, device_id, webauthn_get_response } = body;
 
   const { data: challengeData, error: challengeError } = await supabase
     .from("challenges")
@@ -54,26 +54,36 @@ serve(async (req: Request) => {
     });
   }
 
+  const user_id =
+    typeof name_input === "string" ? name_input.trim() : "";
+  if (!user_id) {
+    return new Response(JSON.stringify({ error: "Name is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    });
+  }
+
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("*")
+    .select("user_id, passkey_credential_id, passkey_public_key")
     .eq("user_id", user_id)
     .single();
 
-  if (userError) {
+  if (userError || !user) {
     return new Response(JSON.stringify({ error: "User not found" }), {
       status: 404,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
 
-  const expectedChallenge = challengeData.challenge;
-  if (typeof expectedChallenge !== "string" || expectedChallenge.trim() === "") {
+  const challengeFromDb = challengeData.challenge;
+  if (typeof challengeFromDb !== "string" || challengeFromDb.trim() === "") {
     return new Response(JSON.stringify({ error: "Invalid challenge data" }), {
       status: 400,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },
     });
   }
+  const expectedChallenge = challengeToBase64Url(challengeFromDb);
 
   if (typeof user.passkey_credential_id !== "string" || user.passkey_credential_id.trim() === "") {
     return new Response(JSON.stringify({ error: "Invalid credential data" }), {
@@ -161,7 +171,7 @@ serve(async (req: Request) => {
       mls_public_key: device.mls_pk,
       profile: {
         userId: user_id,
-        displayName: user.display_name,
+        displayName: user.user_id,
         avatarUrl: user.avatar_url,
       },
     }),

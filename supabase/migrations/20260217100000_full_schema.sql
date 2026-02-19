@@ -1,8 +1,8 @@
 -- Full schema: users -> devices -> challenges -> groups (+ group_members) -> group_seq, messages, send_message
 
+-- user_id = chosen name (unique, immutable, human-readable)
 create table if not exists public.users (
   user_id               text primary key,
-  display_name          text not null,
   avatar_url            text,
   passkey_credential_id text not null unique,
   passkey_public_key    text not null

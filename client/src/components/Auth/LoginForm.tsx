@@ -14,7 +14,7 @@ interface LoginFormProps {
 }
 
 const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
-  const [userIdInput, setUserIdInput] = useState('');
+  const [nameOrIdInput, setNameOrIdInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,9 +43,9 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         return;
       }
 
-      const userId = userIdInput.trim();
-      if (!userId) {
-        setError('Enter your User ID to sign in with passkey');
+      const nameOrId = nameOrIdInput.trim();
+      if (!nameOrId) {
+        setError('Enter your name to sign in');
         return;
       }
 
@@ -54,10 +54,16 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
       const keyManager = new KeyManager();
       await keyManager.init();
 
-      const { challengeId, challenge } = await authService.getChallenge('login');
+      const { challengeId, challenge, userId: resolvedUserIdFromServer } =
+        await authService.getChallenge('login', nameOrId);
+
+      if (!resolvedUserIdFromServer) {
+        setError('User not found. Enter your name or User ID.');
+        return;
+      }
 
       const { userId: resolvedUserId, credentialId, prfOutput, credential } =
-        await authenticatePasskeyDiscoverable(challenge, userId);
+        await authenticatePasskeyDiscoverable(challenge, resolvedUserIdFromServer);
 
       const webauthnGetResponse = serializeGetResponse(credential);
 
@@ -100,9 +106,9 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
       <h2>Login</h2>
       <input
         type="text"
-        placeholder="User ID (from registration)"
-        value={userIdInput}
-        onChange={(e) => setUserIdInput(e.target.value)}
+        placeholder="Your name"
+        value={nameOrIdInput}
+        onChange={(e) => setNameOrIdInput(e.target.value)}
         style={{ width: '100%', padding: 8, marginBottom: 10 }}
       />
       <button type="submit" disabled={loading}>
