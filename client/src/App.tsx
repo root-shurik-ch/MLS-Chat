@@ -8,9 +8,8 @@ import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
 import { loadAllMlsGroups, loadMlsGroup, saveMlsGroup } from './utils/mlsGroupStorage';
-import UIShowcase from './pages/UIShowcase';
 
-type AppView = 'auth' | 'groups' | 'chat' | 'ui';
+type AppView = 'auth' | 'groups' | 'chat';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('auth');
@@ -189,11 +188,6 @@ const App: React.FC = () => {
         )}
         <RegistrationForm onSuccess={handleAuthSuccess} />
         <LoginForm onSuccess={handleAuthSuccess} />
-        <div style={{ marginTop: 12 }}>
-          <button onClick={() => setView('ui')} style={{ padding: '8px 12px', borderRadius: 4, border: '1px solid #555', background: '#111', color: '#fff' }}>
-            UI Showcase
-          </button>
-        </div>
         <p style={{ marginTop: 24, fontSize: 12, color: '#888' }}>v{__APP_VERSION__}</p>
       </div>
     );
@@ -223,11 +217,6 @@ const App: React.FC = () => {
         </div>
       </>
     );
-  }
-
-  // UI Showcase route for design system verification
-  if (view === 'ui') {
-    return <UIShowcase />;
   }
 
   // Chat view
