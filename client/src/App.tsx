@@ -111,21 +111,54 @@ const App: React.FC = () => {
       let mlsGroup = mlsGroups.get(groupId);
 
       if (!mlsGroup && mlsClientRef.current) {
-        // Create WASM group and persist state so it survives page reloads
-        console.log('Creating MLS group:', groupId);
-        mlsGroup = await mlsClientRef.current.createGroup(groupId);
-        const newGroups = new Map(mlsGroups);
-        newGroups.set(groupId, mlsGroup);
-        setMlsGroups(newGroups);
+        // Before creating a new group, check IndexedDB — the group may already exist
+        // from a previous session, and initializeServices may not have finished restoring
+        // state yet (race condition between service init and user clicking a group).
+        const storedGroups = await loadAllMlsGroups();
+        const storedGroup = storedGroups.find(g => g.id === groupId);
 
-        // Persist group metadata and full WASM state
-        await saveMlsGroup(mlsGroup);
-        if (userId) {
+        if (storedGroup && userId) {
+          // Known group — restore from persisted WASM state
           try {
-            const stateJson = await mlsClientRef.current.exportState();
-            await saveWasmState(userId, stateJson);
-          } catch (e) {
-            console.warn('Failed to save WASM state after group creation:', e);
+            // Try loading directly first (works if importState was already called)
+            mlsGroup = await mlsClientRef.current.loadGroup(storedGroup.groupId, storedGroup.id);
+          } catch {
+            // WASM state not yet imported (race) — import it now then retry
+            try {
+              const stateJson = await loadWasmState(userId);
+              if (stateJson) {
+                await mlsClientRef.current.importState(stateJson);
+                mlsGroup = await mlsClientRef.current.loadGroup(storedGroup.groupId, storedGroup.id);
+              }
+            } catch (e) {
+              console.warn('Could not restore group from storage:', e);
+            }
+          }
+          if (mlsGroup) {
+            const newGroups = new Map(mlsGroups);
+            newGroups.set(groupId, mlsGroup);
+            setMlsGroups(newGroups);
+            console.log('Restored MLS group from storage:', groupId);
+          }
+        }
+
+        if (!mlsGroup) {
+          // Truly new group — create it
+          console.log('Creating MLS group:', groupId);
+          mlsGroup = await mlsClientRef.current.createGroup(groupId);
+          const newGroups = new Map(mlsGroups);
+          newGroups.set(groupId, mlsGroup);
+          setMlsGroups(newGroups);
+
+          // Persist group metadata and full WASM state
+          await saveMlsGroup(mlsGroup);
+          if (userId) {
+            try {
+              const stateJson = await mlsClientRef.current.exportState();
+              await saveWasmState(userId, stateJson);
+            } catch (e) {
+              console.warn('Failed to save WASM state after group creation:', e);
+            }
           }
         }
       }

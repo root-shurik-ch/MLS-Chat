@@ -71,11 +71,28 @@ const Chat: React.FC<ChatProps> = ({
         if (!Array.isArray(list) || list.length === 0) return;
         const parsed: Message[] = [];
         for (const m of list) {
+          const ts = typeof m.server_time === 'number'
+            ? m.server_time
+            : new Date(m.server_time as string).getTime();
+
+          // MLS senders cannot decrypt their own ciphertext (CannotDecryptOwnMessage).
+          // Show own messages with a placeholder — plaintext is only available in the
+          // current session's memory. A future improvement: cache plaintext in IndexedDB.
+          if (m.device_id === deviceId) {
+            parsed.push({
+              id: `msg_${m.server_seq}`,
+              senderId: m.sender_id,
+              deviceId: m.device_id,
+              text: '(your message — text only available in the session it was sent)',
+              timestamp: ts,
+              serverSeq: m.server_seq,
+              isSent: true,
+            });
+            continue;
+          }
+
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
-            const ts = typeof m.server_time === 'number'
-              ? m.server_time
-              : new Date(m.server_time as string).getTime();
             parsed.push({
               id: `msg_${m.server_seq}`,
               senderId: m.sender_id,
@@ -83,7 +100,7 @@ const Chat: React.FC<ChatProps> = ({
               text: plaintext,
               timestamp: ts,
               serverSeq: m.server_seq,
-              isSent: m.device_id === deviceId,
+              isSent: false,
             });
           } catch {
             // Skip undecryptable (e.g. from before we joined)
