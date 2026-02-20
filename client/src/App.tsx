@@ -150,14 +150,6 @@ const App: React.FC = () => {
         }
       }
 
-      if (mlsGroup && deliveryServiceRef.current) {
-        await deliveryServiceRef.current.subscribe({
-          userId: userId!,
-          deviceId: deviceId!,
-          groups: [groupId]
-        });
-      }
-
       setCurrentGroupId(groupId);
       setView('chat');
     } catch (error) {

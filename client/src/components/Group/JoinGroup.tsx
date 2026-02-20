@@ -90,9 +90,14 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not set');
 
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
       const joinRes = await fetch(`${supabaseUrl}/functions/v1/group_join`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${localStorage.getItem('authToken') ?? anonKey}`,
+        },
         body: JSON.stringify({ group_id: serverGroupId, user_id: userId, device_id: deviceId }),
       });
       if (!joinRes.ok) {

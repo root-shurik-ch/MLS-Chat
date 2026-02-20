@@ -110,7 +110,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       {/* Create/Join forms */}
       {showCreateForm && (
         <div className="border-t border-white/10 p-4">
-          <CreateGroupForm onSuccess={handleGroupCreated} />
+          <CreateGroupForm mlsClient={mlsClient} onSuccess={handleGroupCreated} />
           <button
             onClick={() => setShowCreateForm(false)}
             className="mt-3 text-[12px] text-white/30 hover:text-white/60 transition-colors"

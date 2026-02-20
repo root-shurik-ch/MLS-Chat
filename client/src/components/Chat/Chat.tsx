@@ -55,9 +55,14 @@ const Chat: React.FC<ChatProps> = ({
 
     const loadHistory = async () => {
       try {
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
         const res = await fetch(`${supabaseUrl}/functions/v1/get_messages`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': anonKey,
+            'Authorization': `Bearer ${localStorage.getItem('authToken') ?? anonKey}`,
+          },
           body: JSON.stringify({ group_id: groupId, user_id: userId, device_id: deviceId }),
         });
         if (!res.ok) return;

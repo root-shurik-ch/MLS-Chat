@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { GroupManager } from '../../mls/group';
 import { MlsClient } from '../../mls/index';
 import { GroupMeta } from '../../domain/Group';
 import { IndexedDBStorage } from '../../utils/storage';
+import { saveMlsGroup } from '../../utils/mlsGroupStorage';
+import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
 import { useToastContext } from '../../contexts/ToastContext';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 
 interface CreateGroupFormProps {
+  mlsClient: MlsClient | null;
   onSuccess?: () => void;
 }
 
-const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ onSuccess }) => {
+const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ mlsClient, onSuccess }) => {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +22,10 @@ const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ onSuccess }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!mlsClient) {
+      toast.error('Not ready. Please wait and try again.');
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -27,23 +33,6 @@ const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ onSuccess }) => {
       const groupId = crypto.randomUUID();
       const userId = localStorage.getItem('userId')!;
       const deviceId = localStorage.getItem('deviceId')!;
-
-      const keyStorage = new IndexedDBStorage('mls-keys', 'keys');
-      await keyStorage.init();
-
-      const mlsPrivateKeyStr = await keyStorage.get(`mlsPrivateKey_${userId}_${deviceId}`);
-      const mlsPublicKeyStr = await keyStorage.get(`mlsPublicKey_${userId}_${deviceId}`);
-
-      if (!mlsPrivateKeyStr || !mlsPublicKeyStr) {
-        throw new Error('MLS keys not found. Please log in again.');
-      }
-
-      const mlsPrivateKey = Uint8Array.from(atob(mlsPrivateKeyStr), c => c.charCodeAt(0));
-      const mlsPublicKey = Uint8Array.from(atob(mlsPublicKeyStr), c => c.charCodeAt(0));
-
-      const mlsClient = new MlsClient(mlsPrivateKey, mlsPublicKey);
-      const groupManager = new GroupManager(mlsClient);
-      await groupManager.createGroup(groupId);
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not set');
@@ -53,9 +42,17 @@ const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ onSuccess }) => {
         return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send';
       })();
 
+      // Create MLS group in the shared WASM backend
+      const mlsGroup = await mlsClient.createGroup(groupId);
+
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
       const res = await fetch(`${supabaseUrl}/functions/v1/group_create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${localStorage.getItem('authToken') ?? anonKey}`,
+        },
         body: JSON.stringify({
           group_id: groupId,
           name,
@@ -70,16 +67,22 @@ const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ onSuccess }) => {
         throw new Error(err.error || 'Failed to create group on server');
       }
 
-      const groupMeta: GroupMeta = {
-        groupId,
-        name,
-        dsUrl,
-        currentEpoch: 0,
-      };
-
+      // Save group meta for display in group list
+      const groupMeta: GroupMeta = { groupId, name, dsUrl, currentEpoch: 0 };
       const groupStorage = new IndexedDBStorage('mls-groups', 'groups');
       await groupStorage.init();
       await groupStorage.set(groupId, groupMeta);
+
+      // Save MLS group to MlsChatGroups/groups so handleSelectGroup can find it
+      await saveMlsGroup(mlsGroup);
+
+      // Persist WASM state so the group survives page reload
+      try {
+        const stateJson = await mlsClient.exportState();
+        await saveAndSyncWasmState(userId, deviceId, stateJson);
+      } catch (e) {
+        console.warn('Failed to save WASM state after group creation:', e);
+      }
 
       toast.success('Group created!');
       setName('');
