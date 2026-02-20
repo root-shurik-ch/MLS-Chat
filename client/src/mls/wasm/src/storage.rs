@@ -74,9 +74,3 @@ pub fn store_key_package(hash_ref: Vec<u8>, bundle: KeyPackageBundle) {
     });
 }
 
-/// Retrieve a key package bundle from thread-local storage
-pub fn get_key_package(hash_ref: &[u8]) -> Option<KeyPackageBundle> {
-    KEY_PACKAGES.with(|kp| {
-        kp.borrow().get(hash_ref).cloned()
-    })
-}
