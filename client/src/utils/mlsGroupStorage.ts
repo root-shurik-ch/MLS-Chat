@@ -209,6 +209,22 @@ export async function saveSentMessage(
  * Returns the plaintext string, or null if not cached.
  */
 export async function getSentMessage(groupId: string, serverSeq: number): Promise<string | null> {
+  const record = await getCachedMessage(groupId, serverSeq);
+  return record ? record.text : null;
+}
+
+export interface CachedMessage {
+  text: string;
+  senderId: string;
+  deviceId: string;
+  timestamp: number;
+}
+
+/**
+ * Look up any cached decrypted message (sent or received) by group + seq.
+ * Returns the full record or null if not yet cached.
+ */
+export async function getCachedMessage(groupId: string, serverSeq: number): Promise<CachedMessage | null> {
   const db = await openDB();
   const transaction = db.transaction([SENT_MESSAGES_STORE], 'readonly');
   const store = transaction.objectStore(SENT_MESSAGES_STORE);
@@ -216,8 +232,8 @@ export async function getSentMessage(groupId: string, serverSeq: number): Promis
 
   return new Promise((resolve, reject) => {
     request.onsuccess = () => {
-      const record = request.result;
-      resolve(record ? (record.text as string) : null);
+      const r = request.result;
+      resolve(r ? { text: r.text, senderId: r.senderId, deviceId: r.deviceId, timestamp: r.timestamp } : null);
     };
     request.onerror = () => reject(request.error);
   });

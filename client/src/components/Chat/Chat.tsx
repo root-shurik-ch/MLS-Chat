@@ -4,7 +4,7 @@ import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase'
 import { MlsClient, MlsGroup } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
 import InviteLink from '../Group/InviteLink';
-import { saveSentMessage, getSentMessage } from '../../utils/mlsGroupStorage';
+import { saveSentMessage, getSentMessage, getCachedMessage } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
 
 interface ChatProps {
@@ -76,8 +76,27 @@ const Chat: React.FC<ChatProps> = ({
             ? m.server_time
             : new Date(m.server_time as string).getTime();
 
+          // Check cache first — MLS decryption is a one-time operation (forward secrecy).
+          // Re-entering the group would fail trying to decrypt already-processed messages.
+          const cachedMsg = await getCachedMessage(groupId, m.server_seq).catch(() => null);
+          if (cachedMsg) {
+            parsed.push({
+              id: `msg_${m.server_seq}`,
+              senderId: cachedMsg.senderId,
+              deviceId: cachedMsg.deviceId,
+              text: cachedMsg.text,
+              timestamp: cachedMsg.timestamp,
+              serverSeq: m.server_seq,
+              isSent: cachedMsg.senderId === userId,
+            });
+            continue;
+          }
+
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
+            // Cache the decrypted plaintext so re-entry doesn't need to re-decrypt
+            saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
+              .catch(() => {});
             parsed.push({
               id: `msg_${m.server_seq}`,
               senderId: m.sender_id,
@@ -85,7 +104,7 @@ const Chat: React.FC<ChatProps> = ({
               text: plaintext,
               timestamp: ts,
               serverSeq: m.server_seq,
-              isSent: m.device_id === deviceId,
+              isSent: m.sender_id === userId,
             });
           } catch (e) {
             if (String(e).includes('CannotDecryptOwnMessage')) {
