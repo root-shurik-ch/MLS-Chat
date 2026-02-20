@@ -13,7 +13,7 @@ use wasm_bindgen::prelude::*;
 mod storage;
 mod provider;
 
-use storage::{get_or_create_signer, store_group, take_group, store_key_package, get_key_package};
+use storage::{get_or_create_signer, store_group, take_group, store_key_package};
 use provider::BACKEND;
 
 #[wasm_bindgen]
@@ -197,7 +197,7 @@ pub fn add_member(group_id_hex: &str, key_package_hex: &str) -> Result<String, J
 
 /// Process a welcome message to join a group
 #[wasm_bindgen]
-pub fn process_welcome(welcome_hex: &str, key_package_ref_hex: &str) -> Result<String, JsValue> {
+pub fn process_welcome(welcome_hex: &str) -> Result<String, JsValue> {
     BACKEND.with(|b| {
         let backend = b.borrow();
 
@@ -210,11 +210,6 @@ pub fn process_welcome(welcome_hex: &str, key_package_ref_hex: &str) -> Result<S
             MlsMessageBodyIn::Welcome(w) => w,
             _ => return Err(JsValue::from_str("Not a welcome message")),
         };
-
-        let kp_ref = hex::decode(key_package_ref_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid key package ref hex: {:?}", e)))?;
-        let _bundle = get_key_package(&kp_ref)
-            .ok_or_else(|| JsValue::from_str("Key package bundle not found in storage"))?;
 
         let join_config = MlsGroupJoinConfig::default();
         let staged_welcome = StagedWelcome::new_from_welcome(

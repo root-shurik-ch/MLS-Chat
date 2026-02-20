@@ -6,6 +6,7 @@ import { useToastContext } from '../../contexts/ToastContext';
 import InviteLink from '../Group/InviteLink';
 import { saveSentMessage, getSentMessage, getCachedMessage } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
+import { ArrowLeft, UserPlus, Lock } from 'lucide-react';
 
 interface ChatProps {
   userId: string;
@@ -44,7 +45,6 @@ const Chat: React.FC<ChatProps> = ({
   const [showInvite, setShowInvite] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Toast notifications
   const toast = useToastContext();
 
   // Load message history when opening chat
@@ -76,8 +76,6 @@ const Chat: React.FC<ChatProps> = ({
             ? m.server_time
             : new Date(m.server_time as string).getTime();
 
-          // Check cache first — MLS decryption is a one-time operation (forward secrecy).
-          // Re-entering the group would fail trying to decrypt already-processed messages.
           const cachedMsg = await getCachedMessage(groupId, m.server_seq).catch(() => null);
           if (cachedMsg) {
             parsed.push({
@@ -94,7 +92,6 @@ const Chat: React.FC<ChatProps> = ({
 
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
-            // Cache the decrypted plaintext so re-entry doesn't need to re-decrypt
             await saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
               .catch(() => {});
             parsed.push({
@@ -108,11 +105,8 @@ const Chat: React.FC<ChatProps> = ({
             });
           } catch (e) {
             if (String(e).includes('CannotDecryptOwnMessage')) {
-              // MLS senders cannot decrypt their own ciphertext.
-              // Look up the cached plaintext saved at send time.
               const cached = await getSentMessage(groupId, m.server_seq).catch(() => null);
               const text = cached ?? '(your message — text unavailable on this device)';
-              // Cache so re-entry loads from cache instead of hitting MLS again
               if (cached) {
                 await saveSentMessage(groupId, m.server_seq, text, m.sender_id, m.device_id, ts)
                   .catch(() => {});
@@ -127,7 +121,6 @@ const Chat: React.FC<ChatProps> = ({
                 isSent: true,
               });
             }
-            // Other errors (e.g. message from before this device joined): silently skip
           }
         }
         if (mounted) {
@@ -148,7 +141,6 @@ const Chat: React.FC<ChatProps> = ({
             return all;
           });
 
-          // Save WASM state after history load — the ratchet has advanced
           if (parsed.length > 0 && mounted) {
             mlsClient.exportState().then(stateJson =>
               saveAndSyncWasmState(userId, deviceId, stateJson)
@@ -163,38 +155,20 @@ const Chat: React.FC<ChatProps> = ({
     return () => { mounted = false; };
   }, [groupId, userId, deviceId, mlsGroup, mlsClient]);
 
-  // Subscribe to group and handle incoming messages
+  // Subscribe and handle incoming messages
   useEffect(() => {
     let mounted = true;
 
     const setupDelivery = async () => {
       try {
-        // Subscribe to this group
-        console.log('Subscribing to group:', groupId);
-        await deliveryService.subscribe({
-          userId,
-          deviceId,
-          groups: [groupId]
-        });
+        await deliveryService.subscribe({ userId, deviceId, groups: [groupId] });
 
-        // Handle incoming messages
         deliveryService.onDeliver(async (msg: IncomingMessage) => {
           if (!mounted) return;
-
-          // Skip our own messages
-          if (msg.senderId === userId && msg.deviceId === deviceId) {
-            return;
-          }
+          if (msg.senderId === userId && msg.deviceId === deviceId) return;
 
           try {
-            // Decrypt MLS message
-            console.log('Decrypting message from', msg.senderId);
-            const plaintext = await mlsClient.decryptMessage(
-              mlsGroup,
-              msg.mlsBytes
-            );
-
-            // Add to messages
+            const plaintext = await mlsClient.decryptMessage(mlsGroup, msg.mlsBytes);
             const newMessage: Message = {
               id: `msg_${msg.serverSeq}`,
               senderId: msg.senderId,
@@ -204,12 +178,8 @@ const Chat: React.FC<ChatProps> = ({
               serverSeq: msg.serverSeq,
               isSent: false,
             };
-
             setMessages(prev => {
-              // Avoid duplicates
-              if (prev.some(m => m.serverSeq === msg.serverSeq)) {
-                return prev;
-              }
+              if (prev.some(m => m.serverSeq === msg.serverSeq)) return prev;
               return [...prev, newMessage].sort((a, b) => {
                 const aSeq = a.serverSeq;
                 const bSeq = b.serverSeq;
@@ -221,28 +191,19 @@ const Chat: React.FC<ChatProps> = ({
             });
           } catch (error) {
             const errStr = String(error);
-            if (errStr.includes('CannotDecryptOwnMessage') || errStr.includes('WrongGroupId')) {
-              // Expected: own message echo or message from a stale MLS epoch — skip silently.
-              return;
-            }
+            if (errStr.includes('CannotDecryptOwnMessage') || errStr.includes('WrongGroupId')) return;
             console.error('MLS decryption failed:', error);
           }
         });
-
-        console.log('Delivery setup complete');
       } catch (error) {
         console.error('Failed to setup delivery:', error);
       }
     };
 
     setupDelivery();
-
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [groupId, userId, deviceId, mlsGroup, mlsClient, deliveryService]);
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -255,7 +216,6 @@ const Chat: React.FC<ChatProps> = ({
     setClientSeq(prev => prev + 1);
     setLoading(true);
 
-    // Add pending message to UI
     const pendingId = `pending_${Date.now()}`;
     const pendingMessage: Message = {
       id: pendingId,
@@ -271,12 +231,7 @@ const Chat: React.FC<ChatProps> = ({
     setInput('');
 
     try {
-      // Encrypt with MLS
-      console.log('Encrypting message with MLS');
       const mlsBytes = await mlsClient.encryptMessage(mlsGroup, text);
-
-      // Send via WebSocket (use app group id = UUID, not MLS internal groupId)
-      console.log('Sending message via WebSocket, seq:', currentSeq);
       const serverSeq = await deliveryService.send({
         groupId,
         senderId: userId,
@@ -286,14 +241,11 @@ const Chat: React.FC<ChatProps> = ({
         clientSeq: currentSeq,
       });
 
-      // Cache plaintext so it's available in history after page reload
-      // (MLS senders cannot decrypt their own ciphertext)
       if (serverSeq > 0) {
         saveSentMessage(groupId, serverSeq, text, userId, deviceId, Date.now())
           .catch(e => console.warn('Failed to cache sent message:', e));
       }
 
-      // Remove pending flag on success
       setMessages(prev =>
         prev.map(m =>
           m.id === pendingId
@@ -301,20 +253,15 @@ const Chat: React.FC<ChatProps> = ({
             : m
         )
       );
-
-      console.log('Message sent successfully');
     } catch (error) {
       console.error('Failed to send message:', error);
-
-      // Mark as failed
       setMessages(prev =>
         prev.map(m =>
           m.id === pendingId
-            ? { ...m, isPending: false, text: `❌ ${m.text} (Failed to send)` }
+            ? { ...m, isPending: false, text: `[failed] ${m.text}` }
             : m
         )
       );
-
       toast.error('Failed to send message. Please try again.');
     } finally {
       setLoading(false);
@@ -322,127 +269,65 @@ const Chat: React.FC<ChatProps> = ({
   };
 
   const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return new Date(timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const getSenderLabel = (senderId: string) => senderId === userId ? 'you' : senderId.substring(0, 12);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full bg-black text-white">
       {/* Header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '10px 15px',
-        borderBottom: '1px solid #ccc',
-        background: '#fff'
-      }}>
-        <button onClick={onBack} style={{ padding: '5px 10px' }}>
-          ← Back
-        </button>
-        <h2 style={{ margin: 0, fontSize: 18 }}>
-          Group Chat
-        </h2>
-        <button
-          onClick={() => setShowInvite(!showInvite)}
-          style={{
-            marginLeft: 'auto',
-            padding: '5px 12px',
-            background: showInvite ? '#6c757d' : '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '13px',
-          }}
-        >
-          {showInvite ? 'Hide Invite' : '+ Invite'}
-        </button>
-        <span style={{ fontSize: 12, color: '#666' }}>
-          {groupId.substring(0, 8)}...
-        </span>
+      <div className="h-14 border-b border-white/10 px-4 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="p-1 text-white/40 hover:text-white transition-colors">
+            <ArrowLeft size={18} />
+          </button>
+          <span className="text-sm font-medium">Group</span>
+          <span className="font-mono text-[11px] text-white/30">{groupId.substring(0, 8)}…</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <Lock size={12} className="text-white/20" />
+          <button
+            onClick={() => setShowInvite(!showInvite)}
+            className="p-1.5 text-white/40 hover:text-white transition-colors"
+            title="Invite member"
+          >
+            <UserPlus size={16} />
+          </button>
+        </div>
       </div>
 
-      {/* Invite section */}
+      {/* Invite panel */}
       {showInvite && (
-        <div style={{ padding: '15px', borderBottom: '1px solid #e0e0e0', background: '#f9f9f9' }}>
+        <div className="border-b border-white/10 px-6 py-5 bg-white/[0.02]">
           <InviteLink
             groupId={groupId}
             mlsGroup={mlsGroup}
             mlsClient={mlsClient}
             onInviteGenerated={(welcome) => {
-              console.log('Welcome message generated:', welcome.substring(0, 50) + '...');
+              console.log('Welcome generated:', welcome.substring(0, 50) + '...');
             }}
           />
         </div>
       )}
 
       {/* Messages */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: 15,
-        background: '#f5f5f5',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10
-      }}>
+      <div className="flex-1 overflow-y-auto py-6">
         {messages.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            color: '#999',
-            marginTop: 50
-          }}>
-            <p>No messages yet</p>
-            <p style={{ fontSize: 14 }}>
-              Start the conversation! 🚀
-            </p>
+          <div className="flex flex-col items-center justify-center h-full gap-2">
+            <Lock size={20} className="text-white/10" />
+            <p className="text-[13px] text-white/20">No messages yet</p>
           </div>
         ) : (
           messages.map(msg => (
-            <div
-              key={msg.id}
-              style={{
-                display: 'flex',
-                justifyContent: msg.isSent ? 'flex-end' : 'flex-start',
-              }}
-            >
-              <div
-                style={{
-                  maxWidth: '70%',
-                  padding: '10px 14px',
-                  borderRadius: 12,
-                  background: msg.isSent ? '#007bff' : '#fff',
-                  color: msg.isSent ? '#fff' : '#000',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                  opacity: msg.isPending ? 0.6 : 1,
-                }}
-              >
-                {!msg.isSent && (
-                  <div style={{
-                    fontSize: 11,
-                    color: '#666',
-                    marginBottom: 4,
-                    fontWeight: 600
-                  }}>
-                    {msg.senderId === userId ? 'You' : msg.senderId.substring(0, 8)}
-                  </div>
-                )}
-                <div style={{ wordBreak: 'break-word' }}>
-                  {msg.text}
-                </div>
-                <div style={{
-                  fontSize: 10,
-                  marginTop: 4,
-                  opacity: 0.7,
-                  textAlign: 'right'
-                }}>
-                  {formatTime(msg.timestamp)}
-                  {msg.isPending && ' • Sending...'}
-                </div>
+            <div key={msg.id} className={`flex flex-col mb-6 px-6 group ${msg.isPending ? 'opacity-50' : ''}`}>
+              <div className="flex items-baseline space-x-2 mb-1">
+                <span className="font-semibold text-sm">{getSenderLabel(msg.senderId)}</span>
+                <span className="text-[10px] text-white/30">{formatTime(msg.timestamp)}</span>
+                {msg.isPending && <span className="text-[10px] text-white/20">sending…</span>}
+              </div>
+              <div className="text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+                {msg.text}
               </div>
             </div>
           ))
@@ -450,54 +335,26 @@ const Chat: React.FC<ChatProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div style={{
-        padding: 15,
-        borderTop: '1px solid #ccc',
-        background: '#fff'
-      }}>
-        <div style={{ display: 'flex', gap: 10 }}>
+      {/* Input bar */}
+      <div className="p-4 border-t border-white/5 bg-black shrink-0">
+        <div className="flex items-center gap-3">
           <input
             type="text"
             name="message"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message..."
-            style={{
-              flex: 1,
-              padding: '10px 14px',
-              border: '1px solid #ccc',
-              borderRadius: 20,
-              fontSize: 14,
-              outline: 'none'
-            }}
-            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+            placeholder="Type a message…"
+            className="flex-1 bg-transparent border-b border-white/10 focus:border-white/40 py-2 px-0 outline-none transition-all text-[15px] placeholder:text-white/20"
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             disabled={loading}
           />
           <button
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            style={{
-              padding: '10px 20px',
-              background: loading || !input.trim() ? '#ccc' : '#007bff',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 20,
-              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-              fontSize: 14,
-              fontWeight: 600
-            }}
+            className="text-[13px] font-medium text-white/60 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? 'Sending...' : 'Send'}
+            {loading ? '…' : 'Send'}
           </button>
-        </div>
-        <div style={{
-          fontSize: 11,
-          color: '#666',
-          marginTop: 8,
-          textAlign: 'center'
-        }}>
-          🔒 End-to-end encrypted with MLS
         </div>
       </div>
     </div>

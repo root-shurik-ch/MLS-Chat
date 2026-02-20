@@ -1,4 +1,4 @@
-// Connection status indicator component
+// Connection status indicator — subtle monochrome status line
 import React from 'react';
 import { ConnectionState } from '../utils/WebSocketManager';
 import { useConnectionState, useOfflineQueueSize } from '../hooks/useConnectionState';
@@ -9,7 +9,7 @@ interface ConnectionStatusProps {
 }
 
 export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ deliveryService }) => {
-  const { state, isConnected, isReconnecting } = useConnectionState(deliveryService);
+  const { state, isConnected } = useConnectionState(deliveryService);
   const queueSize = useOfflineQueueSize();
 
   // Don't show anything if connected and queue is empty
@@ -17,64 +17,42 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ deliveryServ
     return null;
   }
 
-  const getStatusColor = () => {
+  const getDotClass = () => {
     switch (state) {
       case ConnectionState.CONNECTED:
-        return 'bg-green-500';
+        return 'bg-white/60';
       case ConnectionState.CONNECTING:
       case ConnectionState.RECONNECTING:
-        return 'bg-yellow-500';
+        return 'bg-white/30 animate-pulse';
       case ConnectionState.DISCONNECTED:
       case ConnectionState.FAILED:
-        return 'bg-red-500';
+        return 'bg-white/20';
       default:
-        return 'bg-gray-500';
+        return 'bg-white/10';
     }
   };
 
   const getStatusText = () => {
-    if (queueSize > 0) {
-      return `${queueSize} message${queueSize > 1 ? 's' : ''} queued`;
-    }
-
+    if (queueSize > 0) return `${queueSize} queued`;
     switch (state) {
-      case ConnectionState.CONNECTED:
-        return 'Connected';
-      case ConnectionState.CONNECTING:
-        return 'Connecting...';
-      case ConnectionState.RECONNECTING:
-        return 'Reconnecting...';
-      case ConnectionState.DISCONNECTED:
-        return 'Disconnected';
-      case ConnectionState.FAILED:
-        return 'Connection failed';
-      default:
-        return 'Unknown';
+      case ConnectionState.CONNECTING: return 'connecting';
+      case ConnectionState.RECONNECTING: return 'reconnecting';
+      case ConnectionState.DISCONNECTED: return 'disconnected';
+      case ConnectionState.FAILED: return 'connection failed';
+      default: return '';
     }
   };
 
+  const text = getStatusText();
+  if (!text) return null;
+
   return (
-    <div className="fixed top-4 right-4 z-50">
-      <div className="flex items-center gap-2 bg-white dark:bg-gray-800 shadow-lg rounded-lg px-4 py-2 border border-gray-200 dark:border-gray-700">
-        {/* Status indicator dot */}
-        <div className="relative flex items-center">
-          <div className={`w-2 h-2 rounded-full ${getStatusColor()}`} />
-          {isReconnecting && (
-            <div className={`absolute w-2 h-2 rounded-full ${getStatusColor()} animate-ping`} />
-          )}
-        </div>
-
-        {/* Status text */}
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {getStatusText()}
+    <div className="fixed bottom-4 right-4 z-50">
+      <div className="flex items-center gap-2 bg-black border border-white/10 px-3 py-1.5">
+        <div className={`w-1.5 h-1.5 rounded-full ${getDotClass()}`} />
+        <span className="font-mono text-[11px] text-white/30 uppercase tracking-widest">
+          {text}{!navigator.onLine && ' · offline'}
         </span>
-
-        {/* Offline indicator */}
-        {!navigator.onLine && (
-          <span className="text-xs text-orange-600 dark:text-orange-400 font-semibold">
-            OFFLINE
-          </span>
-        )}
       </div>
     </div>
   );

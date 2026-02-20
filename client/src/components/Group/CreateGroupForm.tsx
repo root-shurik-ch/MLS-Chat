@@ -4,14 +4,18 @@ import { MlsClient } from '../../mls/index';
 import { GroupMeta } from '../../domain/Group';
 import { IndexedDBStorage } from '../../utils/storage';
 import { useToastContext } from '../../contexts/ToastContext';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
 
-const CreateGroupForm: React.FC = () => {
+interface CreateGroupFormProps {
+  onSuccess?: () => void;
+}
+
+const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ onSuccess }) => {
   const [name, setName] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Toast notifications
   const toast = useToastContext();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -24,39 +28,38 @@ const CreateGroupForm: React.FC = () => {
       const userId = localStorage.getItem('userId')!;
       const deviceId = localStorage.getItem('deviceId')!;
 
-      // Load MLS keys from secure IndexedDB storage
       const keyStorage = new IndexedDBStorage('mls-keys', 'keys');
       await keyStorage.init();
-      
+
       const mlsPrivateKeyStr = await keyStorage.get(`mlsPrivateKey_${userId}_${deviceId}`);
       const mlsPublicKeyStr = await keyStorage.get(`mlsPublicKey_${userId}_${deviceId}`);
-      
+
       if (!mlsPrivateKeyStr || !mlsPublicKeyStr) {
         throw new Error('MLS keys not found. Please log in again.');
       }
 
       const mlsPrivateKey = Uint8Array.from(atob(mlsPrivateKeyStr), c => c.charCodeAt(0));
       const mlsPublicKey = Uint8Array.from(atob(mlsPublicKeyStr), c => c.charCodeAt(0));
-      
+
       const mlsClient = new MlsClient(mlsPrivateKey, mlsPublicKey);
       const groupManager = new GroupManager(mlsClient);
       await groupManager.createGroup(groupId);
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('VITE_SUPABASE_URL is not set');
-      }
+      if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not set');
+
       const dsUrl = import.meta.env.VITE_WS_URL || (() => {
         const u = new URL(supabaseUrl);
         return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send';
       })();
+
       const res = await fetch(`${supabaseUrl}/functions/v1/group_create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           group_id: groupId,
           name,
-          avatar_url: avatarUrl || undefined,
+          avatar_url: undefined,
           user_id: userId,
           device_id: deviceId,
           ds_url: dsUrl,
@@ -70,7 +73,6 @@ const CreateGroupForm: React.FC = () => {
       const groupMeta: GroupMeta = {
         groupId,
         name,
-        avatarUrl: avatarUrl || undefined,
         dsUrl,
         currentEpoch: 0,
       };
@@ -79,8 +81,9 @@ const CreateGroupForm: React.FC = () => {
       await groupStorage.init();
       await groupStorage.set(groupId, groupMeta);
 
-      toast.success('Group created successfully!');
-      window.location.reload();
+      toast.success('Group created!');
+      setName('');
+      onSuccess?.();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to create group';
       setError(errorMsg);
@@ -91,25 +94,20 @@ const CreateGroupForm: React.FC = () => {
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <h2>Create Group</h2>
-      <input
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <p className="text-[11px] uppercase tracking-widest text-white/40">New Group</p>
+      <Input
         type="text"
-        placeholder="Group Name"
+        placeholder="Group name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         required
+        className="text-white placeholder:text-white/20"
       />
-      <input
-        type="url"
-        placeholder="Avatar URL (optional)"
-        value={avatarUrl}
-        onChange={(e) => setAvatarUrl(e.target.value)}
-      />
-      <button type="submit" disabled={loading}>
+      <Button type="submit" variant="primary" disabled={loading} className="w-full disabled:opacity-40">
         {loading ? 'Creating...' : 'Create Group'}
-      </button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      </Button>
+      {error && <p className="text-[13px] text-red-400/80">{error}</p>}
     </form>
   );
 };

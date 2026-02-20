@@ -73,7 +73,7 @@ export function load_group(group_id_hex: string): string;
 /**
  * Process a welcome message to join a group
  */
-export function process_welcome(welcome_hex: string, key_package_ref_hex: string): string;
+export function process_welcome(welcome_hex: string): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -92,7 +92,7 @@ export interface InitOutput {
     readonly greet: (a: number, b: number) => void;
     readonly import_state: (a: number, b: number) => [number, number];
     readonly load_group: (a: number, b: number) => [number, number, number, number];
-    readonly process_welcome: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly process_welcome: (a: number, b: number) => [number, number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

@@ -9,6 +9,9 @@ import { generateDeviceId, decodeBase64Url, decryptString } from '../../utils/cr
 import { KeyManager } from '../../utils/keyManager';
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 import { saveWasmState } from '../../utils/mlsGroupStorage';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Lock } from 'lucide-react';
 
 interface LoginFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
@@ -85,8 +88,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         mlsPublicKeyBytes
       );
 
-      // If the server has a previously uploaded WASM state, decrypt and save it to
-      // IndexedDB so initializeServices can import it (enables cross-device history).
       if (wasmStateEnc) {
         try {
           const kWasm = await keyManager.getKWasmState(resolvedUserId);
@@ -118,19 +119,24 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <h2>Login</h2>
-      <input
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Lock size={14} className="text-white/40" />
+        <span className="text-[11px] uppercase tracking-widest text-white/40">Sign In</span>
+      </div>
+      <Input
         type="text"
         placeholder="Your name"
         value={nameOrIdInput}
         onChange={(e) => setNameOrIdInput(e.target.value)}
-        style={{ width: '100%', padding: 8, marginBottom: 10 }}
+        className="text-white placeholder:text-white/20"
       />
-      <button type="submit" disabled={loading}>
+      <Button type="submit" variant="primary" disabled={loading} className="w-full disabled:opacity-40">
         {loading ? 'Signing in...' : 'Sign in with passkey'}
-      </button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      </Button>
+      {error && (
+        <p className="text-[13px] text-red-400/80">{error}</p>
+      )}
     </form>
   );
 };

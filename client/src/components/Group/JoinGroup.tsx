@@ -1,8 +1,12 @@
-// Component for joining a group using a Welcome message
+// Two-step join flow:
+// Step 1: JOINER generates invite request (KP hex) to share with group admin
+// Step 2: JOINER pastes Welcome code from admin → joins group
 import React, { useState } from 'react';
 import { MlsClient } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
-import { saveMlsGroup, saveWasmState } from '../../utils/mlsGroupStorage';
+import { saveMlsGroup } from '../../utils/mlsGroupStorage';
+import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
+import { Button } from '../ui/Button';
 
 interface JoinGroupProps {
   mlsClient: MlsClient;
@@ -24,19 +28,46 @@ function parseInviteCode(input: string): { groupId: string; welcome: string } | 
 }
 
 export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }) => {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [kpHex, setKpHex] = useState<string | null>(null);
+  const [kpCopied, setKpCopied] = useState(false);
   const [welcomeCode, setWelcomeCode] = useState('');
   const [loading, setLoading] = useState(false);
   const toast = useToastContext();
 
+  // Step 1: Generate invite request (KP) for joiner to share with admin
+  const handleGenerateKP = async () => {
+    try {
+      setLoading(true);
+      const kp = await mlsClient.generateKeyPackage();
+      setKpHex(kp.data);
+      setStep(2);
+    } catch (error) {
+      console.error('Failed to generate invite request:', error);
+      toast.error('Failed to generate invite request. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopyKP = async () => {
+    if (!kpHex) return;
+    await navigator.clipboard.writeText(kpHex);
+    setKpCopied(true);
+    setTimeout(() => setKpCopied(false), 2000);
+    toast.success('Invite request copied!');
+  };
+
+  // Step 2: Process Welcome from admin
   const handleJoin = async () => {
     if (!welcomeCode.trim()) {
-      toast.warning('Please enter an invitation code');
+      toast.warning('Paste the welcome code from the group admin.');
       return;
     }
 
     const parsed = parseInviteCode(welcomeCode);
     if (!parsed) {
-      toast.error('Invalid invitation format. Paste the full code shared by the inviter (must include group id).');
+      toast.error('Invalid welcome format. Paste the full code shared by the admin.');
       return;
     }
 
@@ -51,22 +82,16 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
     try {
       setLoading(true);
 
-      const keyPackage = await mlsClient.generateKeyPackage();
-      console.log('Processing Welcome message...');
-      const mlsGroup = await mlsClient.processWelcome(welcome, keyPackage);
+      // KP was already generated in step 1 and stored in WASM backend
+      const mlsGroup = await mlsClient.processWelcome(welcome);
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('VITE_SUPABASE_URL is not set');
-      }
+      if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not set');
+
       const joinRes = await fetch(`${supabaseUrl}/functions/v1/group_join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          group_id: serverGroupId,
-          user_id: userId,
-          device_id: deviceId,
-        }),
+        body: JSON.stringify({ group_id: serverGroupId, user_id: userId, device_id: deviceId }),
       });
       if (!joinRes.ok) {
         const err = await joinRes.json().catch(() => ({ error: joinRes.statusText }));
@@ -75,17 +100,14 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
 
       await saveMlsGroup({ ...mlsGroup, id: serverGroupId, groupId: mlsGroup.groupId });
 
-      // Persist WASM state so the group survives page reloads
-      if (userId) {
-        try {
-          const stateJson = await mlsClient.exportState();
-          await saveWasmState(userId, stateJson);
-        } catch (e) {
-          console.warn('Failed to save WASM state after joining group:', e);
-        }
+      try {
+        const stateJson = await mlsClient.exportState();
+        await saveAndSyncWasmState(userId, deviceId, stateJson);
+      } catch (e) {
+        console.warn('Failed to save WASM state after joining group:', e);
       }
 
-      toast.success('Successfully joined group!');
+      toast.success('Joined group!');
       setWelcomeCode('');
       onJoinSuccess(serverGroupId);
     } catch (error) {
@@ -97,51 +119,66 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
   };
 
   return (
-    <div style={{
-      padding: '20px',
-      border: '1px solid #e0e0e0',
-      borderRadius: '8px',
-      marginBottom: '20px'
-    }}>
-      <h3 style={{ marginTop: 0 }}>Join Group</h3>
-      <p style={{ fontSize: '14px', color: '#666' }}>
-        Enter the invitation code someone shared with you
-      </p>
+    <div className="space-y-6">
+      {/* Step 1 */}
+      <div className={step === 1 ? '' : 'opacity-50'}>
+        <p className="text-[13px] text-white/40 uppercase tracking-widest mb-3">
+          Step 1 — Generate Invite Request
+        </p>
+        {!kpHex ? (
+          <div className="space-y-3">
+            <p className="text-sm text-white/60">
+              Generate a one-time invite request code to share with the group admin.
+            </p>
+            <Button
+              variant="primary"
+              onClick={handleGenerateKP}
+              disabled={loading || step !== 1}
+              className="disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {loading && step === 1 ? 'Generating...' : 'Generate Invite Request'}
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-white/60">Share this code with the group admin:</p>
+            <div className="border border-white/10 p-3 font-mono text-[11px] text-white/50 max-h-[100px] overflow-y-auto break-all">
+              {kpHex}
+            </div>
+            <Button variant="ghost" onClick={handleCopyKP}>
+              {kpCopied ? 'Copied!' : 'Copy Invite Request'}
+            </Button>
+          </div>
+        )}
+      </div>
 
-      <textarea
-        value={welcomeCode}
-        onChange={(e) => setWelcomeCode(e.target.value)}
-        placeholder="Paste invitation code here..."
-        style={{
-          width: '100%',
-          minHeight: '120px',
-          padding: '10px',
-          border: '1px solid #ccc',
-          borderRadius: '4px',
-          fontSize: '12px',
-          fontFamily: 'monospace',
-          marginBottom: '10px',
-          resize: 'vertical',
-        }}
-      />
-
-      <button
-        onClick={handleJoin}
-        disabled={loading || !welcomeCode.trim()}
-        style={{
-          padding: '10px 20px',
-          background: loading || !welcomeCode.trim() ? '#ccc' : '#007bff',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: loading || !welcomeCode.trim() ? 'not-allowed' : 'pointer',
-          fontSize: '14px',
-          fontWeight: 600,
-          width: '100%',
-        }}
-      >
-        {loading ? 'Joining...' : 'Join Group'}
-      </button>
+      {/* Step 2 */}
+      {kpHex && (
+        <div>
+          <p className="text-[13px] text-white/40 uppercase tracking-widest mb-3">
+            Step 2 — Paste Welcome Code
+          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-white/60">
+              Once the admin processes your request, paste their welcome code here.
+            </p>
+            <textarea
+              value={welcomeCode}
+              onChange={(e) => setWelcomeCode(e.target.value)}
+              placeholder="Paste welcome code from admin..."
+              className="w-full min-h-[100px] bg-transparent border border-white/10 focus:border-white/40 px-3 py-2 outline-none transition-all font-mono text-[12px] text-white/70 placeholder:text-white/20 resize-none"
+            />
+            <Button
+              variant="primary"
+              onClick={handleJoin}
+              disabled={loading || !welcomeCode.trim()}
+              className="w-full disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Joining...' : 'Join Group'}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -142,10 +142,10 @@ export class MlsClient {
     }
   }
 
-  async processWelcome(welcomeMessage: string, keyPackage: KeyPackage): Promise<MlsGroup> {
+  async processWelcome(welcomeMessage: string): Promise<MlsGroup> {
     await this.init()
-    
-    const result = process_welcome(welcomeMessage, keyPackage.data)
+
+    const result = process_welcome(welcomeMessage)
     const groupState = JSON.parse(result)
     
     return {

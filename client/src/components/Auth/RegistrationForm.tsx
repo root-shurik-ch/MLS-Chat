@@ -17,6 +17,9 @@ import { KeyManager } from '../../utils/keyManager';
 
 const NAME_MAX_LENGTH = 64;
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Lock } from 'lucide-react';
 
 interface RegistrationFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
@@ -52,7 +55,6 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         return;
       }
 
-      // user_id = chosen display name (unique, no separate random id)
       const userId = displayName.trim();
       if (userId.length === 0) {
         setError('Name is required');
@@ -119,20 +121,25 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
-      <h2>Register</h2>
-      <input
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Lock size={14} className="text-white/40" />
+        <span className="text-[11px] uppercase tracking-widest text-white/40">Create Account</span>
+      </div>
+      <Input
         type="text"
-        placeholder="Your name (unique, cannot be changed later)"
+        placeholder="Choose a unique name"
         value={displayName}
         onChange={(e) => setDisplayName(e.target.value)}
         required
-        style={{ width: '100%', padding: 8, marginBottom: 10 }}
+        className="text-white placeholder:text-white/20"
       />
-      <button type="submit" disabled={loading}>
-        {loading ? 'Registering...' : 'Register'}
-      </button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      <Button type="submit" variant="primary" disabled={loading} className="w-full disabled:opacity-40">
+        {loading ? 'Registering...' : 'Register with passkey'}
+      </Button>
+      {error && (
+        <p className="text-[13px] text-red-400/80">{error}</p>
+      )}
     </form>
   );
 };

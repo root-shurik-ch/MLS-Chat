@@ -4,12 +4,15 @@ import JoinGroup from './JoinGroup';
 import CreateGroupForm from './CreateGroupForm';
 import { MlsClient } from '../../mls/index';
 import { IndexedDBStorage } from '../../utils/storage';
+import { Plus, LogIn } from 'lucide-react';
+import { Button } from '../ui/Button';
 
 interface GroupManagementProps {
   userId: string;
   deviceId: string;
   mlsClient: MlsClient | null;
   onSelectGroup: (groupId: string) => void;
+  onGroupCreated?: () => void;
 }
 
 async function loadGroupMetasFromIndexedDB(): Promise<GroupMeta[]> {
@@ -30,7 +33,8 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   userId: _userId,
   deviceId: _deviceId,
   mlsClient,
-  onSelectGroup
+  onSelectGroup,
+  onGroupCreated,
 }) => {
   const [groups, setGroups] = useState<GroupMeta[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -52,10 +56,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   useEffect(() => {
     loadGroups();
   }, [loadGroups]);
-
-  const handleOpenChat = (groupId: string) => {
-    onSelectGroup(groupId);
-  };
 
   const handleJoinSuccess = async (groupId: string) => {
     const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]') as GroupMeta[];
@@ -79,63 +79,82 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     onSelectGroup(groupId);
   };
 
+  const handleGroupCreated = async () => {
+    setShowCreateForm(false);
+    await loadGroups();
+    onGroupCreated?.();
+  };
+
   return (
-    <div>
-      <h2>Groups</h2>
-
-      {/* Join Group Form */}
-      {mlsClient && showJoinForm && (
-        <div style={{ marginBottom: 20 }}>
-          <JoinGroup mlsClient={mlsClient} onJoinSuccess={handleJoinSuccess} />
-          <button onClick={() => setShowJoinForm(false)} style={{ marginTop: 10 }}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {/* Create/Join Buttons */}
-      {!showCreateForm && !showJoinForm && (
-        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-          <button onClick={() => setShowCreateForm(true)}>Create Group</button>
-          {mlsClient && (
-            <button onClick={() => setShowJoinForm(true)} style={{ background: '#28a745' }}>
-              Join Group
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Create Form: full flow (MLS + group_create API + IndexedDB) so sending messages works */}
-      {showCreateForm && (
-        <div style={{ marginBottom: 20 }}>
-          <CreateGroupForm />
-          <button onClick={() => setShowCreateForm(false)} style={{ marginTop: 10 }}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      <div>
+    <div className="flex flex-col h-full">
+      {/* Group list */}
+      <div className="flex-1 overflow-y-auto">
         {groups.length === 0 ? (
-          <p>No groups yet</p>
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] text-white/20">No groups yet</p>
+          </div>
         ) : (
           groups.map(group => (
-            <div 
-              key={group.groupId} 
-              style={{ 
-                padding: 10, 
-                margin: '5px 0', 
-                background: '#f5f5f5',
-                borderRadius: 4,
-                cursor: 'pointer'
-              }}
-              onClick={() => handleOpenChat(group.groupId)}
+            <div
+              key={group.groupId}
+              className="flex items-center justify-between px-4 py-4 hover:bg-white/5 cursor-pointer transition-all border-b border-white/5"
+              onClick={() => onSelectGroup(group.groupId)}
             >
-              <strong>{group.name}</strong>
+              <span className="text-sm font-medium">{group.name}</span>
+              <span className="font-mono text-[10px] text-white/20">{group.groupId.substring(0, 6)}</span>
             </div>
           ))
         )}
       </div>
+
+      {/* Create/Join forms */}
+      {showCreateForm && (
+        <div className="border-t border-white/10 p-4">
+          <CreateGroupForm onSuccess={handleGroupCreated} />
+          <button
+            onClick={() => setShowCreateForm(false)}
+            className="mt-3 text-[12px] text-white/30 hover:text-white/60 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {showJoinForm && mlsClient && (
+        <div className="border-t border-white/10 p-4">
+          <JoinGroup mlsClient={mlsClient} onJoinSuccess={handleJoinSuccess} />
+          <button
+            onClick={() => setShowJoinForm(false)}
+            className="mt-3 text-[12px] text-white/30 hover:text-white/60 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {!showCreateForm && !showJoinForm && (
+        <div className="border-t border-white/10 p-4 flex gap-3">
+          <Button
+            variant="ghost"
+            onClick={() => setShowCreateForm(true)}
+            className="flex-1 flex items-center justify-center gap-2 py-2"
+          >
+            <Plus size={14} />
+            <span className="text-[13px]">New</span>
+          </Button>
+          {mlsClient && (
+            <Button
+              variant="ghost"
+              onClick={() => setShowJoinForm(true)}
+              className="flex-1 flex items-center justify-center gap-2 py-2"
+            >
+              <LogIn size={14} />
+              <span className="text-[13px]">Join</span>
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

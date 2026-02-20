@@ -9,6 +9,8 @@ import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
 import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteWasmState } from './utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from './utils/wasmStateSync';
+import { Lock, LogOut } from 'lucide-react';
+import { Button } from './components/ui/Button';
 
 type AppView = 'auth' | 'groups' | 'chat';
 
@@ -18,30 +20,25 @@ const App: React.FC = () => {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
 
-  // MLS and WebSocket services
   const mlsClientRef = useRef<MlsClient | null>(null);
   const deliveryServiceRef = useRef<DeliveryServiceSupabase | null>(null);
   const [mlsGroups, setMlsGroups] = useState<Map<string, MlsGroup>>(new Map());
   const [isConnecting, setIsConnecting] = useState(false);
 
-  // Toast notifications
   const toast = useToastContext();
 
   const initializeServices = useCallback(async (userId: string, _deviceId: string) => {
     try {
       setIsConnecting(true);
 
-      // Initialize MLS client
       if (!mlsClientRef.current) {
         mlsClientRef.current = new MlsClient(userId);
       }
 
-      // Initialize delivery service
       if (!deliveryServiceRef.current) {
         deliveryServiceRef.current = new DeliveryServiceSupabase();
       }
 
-      // Connect to WebSocket (use Supabase host when VITE_WS_URL not set, so production works)
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const wsUrl = import.meta.env.VITE_WS_URL || (supabaseUrl
         ? (() => {
@@ -51,26 +48,23 @@ const App: React.FC = () => {
         : 'ws://localhost:54321/functions/v1/ds_send');
       const authToken = {
         value: localStorage.getItem('authToken') || `temp_token_${userId}`,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000
       };
 
       await deliveryServiceRef.current.connect(wsUrl, authToken);
 
-      // Restore MLS state from IndexedDB so groups can be decrypted after page reload
       try {
         const stateJson = await loadWasmState(userId);
         if (stateJson && mlsClientRef.current) {
           await mlsClientRef.current.importState(stateJson);
           console.log('Restored WASM state from IndexedDB');
 
-          // Restore each known group into the WASM GROUPS map
           const storedGroups = await loadAllMlsGroups();
           const restoredGroups = new Map<string, MlsGroup>();
           for (const stored of storedGroups) {
             try {
               const mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
               restoredGroups.set(stored.id, mlsGroup);
-              console.log('Restored group:', stored.id);
             } catch (e) {
               console.warn('Could not restore group', stored.id, e);
             }
@@ -81,50 +75,37 @@ const App: React.FC = () => {
         }
       } catch (e) {
         console.warn('Failed to restore WASM state:', e);
-        // Non-fatal: groups will be recreated fresh when opened
       }
 
       console.log('Services initialized successfully');
-      toast.success('Connected to server');
+      toast.success('Connected');
     } catch (error) {
       console.error('Failed to initialize services:', error);
-      toast.error('Failed to connect to server. Please try again.');
+      toast.error('Failed to connect. Please try again.');
     } finally {
       setIsConnecting(false);
     }
   }, []);
 
-  // Do not auto-redirect to groups: show auth first so Register/Login always run (passkey requested).
-  // User with saved session can click "Continue with saved session" to restore.
-
   const handleAuthSuccess = async (userId: string, deviceId: string) => {
     setUserId(userId);
     setDeviceId(deviceId);
     setView('groups');
-
-    // Initialize services after successful auth
     await initializeServices(userId, deviceId);
   };
 
   const handleSelectGroup = async (groupId: string) => {
     try {
-      // Check if MLS group already exists in current session
       let mlsGroup = mlsGroups.get(groupId);
 
       if (!mlsGroup && mlsClientRef.current) {
-        // Before creating a new group, check IndexedDB — the group may already exist
-        // from a previous session, and initializeServices may not have finished restoring
-        // state yet (race condition between service init and user clicking a group).
         const storedGroups = await loadAllMlsGroups();
         const storedGroup = storedGroups.find(g => g.id === groupId);
 
         if (storedGroup && userId) {
-          // Known group — restore from persisted WASM state
           try {
-            // Try loading directly first (works if importState was already called)
             mlsGroup = await mlsClientRef.current.loadGroup(storedGroup.groupId, storedGroup.id);
           } catch {
-            // WASM state not yet imported (race) — import it now then retry
             try {
               const stateJson = await loadWasmState(userId);
               if (stateJson) {
@@ -139,27 +120,20 @@ const App: React.FC = () => {
             const newGroups = new Map(mlsGroups);
             newGroups.set(groupId, mlsGroup);
             setMlsGroups(newGroups);
-            console.log('Restored MLS group from storage:', groupId);
           }
         }
 
         if (!mlsGroup && storedGroup) {
-          // Group existed before but WASM state could not be restored.
-          // Creating a new group would produce a different MLS group_id, breaking
-          // decryption of all existing messages. Show error and abort.
           toast.error('Encryption state for this group could not be restored. Try logging out and back in.');
           return;
         }
 
         if (!mlsGroup) {
-          // Truly new group (no prior record in IndexedDB) — create it
-          console.log('Creating MLS group:', groupId);
           mlsGroup = await mlsClientRef.current.createGroup(groupId);
           const newGroups = new Map(mlsGroups);
           newGroups.set(groupId, mlsGroup);
           setMlsGroups(newGroups);
 
-          // Persist group metadata and full WASM state (local + remote)
           await saveMlsGroup(mlsGroup);
           if (userId) {
             try {
@@ -173,7 +147,6 @@ const App: React.FC = () => {
       }
 
       if (mlsGroup && deliveryServiceRef.current) {
-        // Subscribe to group
         await deliveryServiceRef.current.subscribe({
           userId: userId!,
           deviceId: deviceId!,
@@ -202,16 +175,13 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-    // Disconnect services
     if (deliveryServiceRef.current) {
       deliveryServiceRef.current.disconnect();
       deliveryServiceRef.current = null;
     }
-
     mlsClientRef.current = null;
     setMlsGroups(new Map());
 
-    // Clean up persisted WASM state for this user
     if (userId) {
       deleteWasmState(userId).catch(() => {});
     }
@@ -223,6 +193,7 @@ const App: React.FC = () => {
     setView('auth');
   };
 
+  // Auth view — full screen centered Key Ceremony
   if (view === 'auth') {
     const savedUserId = typeof window !== 'undefined' ? localStorage.getItem('userId') : null;
     const savedDeviceId = typeof window !== 'undefined' ? localStorage.getItem('deviceId') : null;
@@ -238,49 +209,94 @@ const App: React.FC = () => {
     };
 
     return (
-      <div style={{ maxWidth: 400, margin: '0 auto', padding: 20 }}>
-        <h1>MLS Chat</h1>
-        {hasSavedSession && (
-          <div style={{ marginBottom: 16, padding: 12, background: '#e7f3ff', borderRadius: 8 }}>
-            <p style={{ margin: '0 0 8px 0' }}>You have a saved session.</p>
-            <button type="button" onClick={handleContinueSession} style={{ marginRight: 8 }}>
-              Continue to Groups
-            </button>
-            <button type="button" onClick={handleLogout}>
-              Log out and Register / Sign in again
-            </button>
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
+        <div className="w-full max-w-sm space-y-10">
+          {/* Header */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Lock size={16} className="text-white/40" />
+              <span className="font-mono text-[11px] text-white/30 uppercase tracking-widest">minimum.chat</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">End-to-end encrypted.</h1>
+            <p className="text-[13px] text-white/40 leading-relaxed">
+              Keys stay on your device. We store nothing but encrypted noise.
+            </p>
           </div>
-        )}
-        <RegistrationForm onSuccess={handleAuthSuccess} />
-        <LoginForm onSuccess={handleAuthSuccess} />
-        <p style={{ marginTop: 24, fontSize: 12, color: '#888' }}>v{__APP_VERSION__}</p>
+
+          {/* Saved session */}
+          {hasSavedSession && (
+            <div className="border border-white/10 p-4 space-y-3">
+              <p className="text-[13px] text-white/60">You have a saved session.</p>
+              <div className="flex gap-3">
+                <Button variant="primary" onClick={handleContinueSession} className="flex-1">
+                  Continue
+                </Button>
+                <Button variant="ghost" onClick={handleLogout} className="flex-1">
+                  Sign out
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Forms */}
+          <div className="space-y-8">
+            <RegistrationForm onSuccess={handleAuthSuccess} />
+            <div className="border-t border-white/5" />
+            <LoginForm onSuccess={handleAuthSuccess} />
+          </div>
+
+          <p className="font-mono text-[10px] text-white/15">v{__APP_VERSION__}</p>
+        </div>
       </div>
     );
   }
 
+  // Groups view — sidebar layout
   if (view === 'groups') {
     return (
-      <>
+      <div className="min-h-screen bg-black text-white flex">
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-        <div style={{ maxWidth: 600, margin: '0 auto', padding: 20 }}>
-          <h1>MLS Chat - Groups</h1>
+
+        {/* Sidebar */}
+        <aside className="w-72 border-r border-white/10 h-screen flex flex-col">
+          <div className="h-14 border-b border-white/10 px-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock size={12} className="text-white/20" />
+              <span className="text-sm font-medium">minimum.chat</span>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-1.5 text-white/30 hover:text-white transition-colors"
+              title="Log out"
+            >
+              <LogOut size={15} />
+            </button>
+          </div>
+
           {isConnecting && (
-            <div style={{ padding: 10, background: '#fff3cd', borderRadius: 4, marginBottom: 10 }}>
-              Connecting to server...
+            <div className="px-4 py-2 border-b border-white/5">
+              <span className="text-[11px] text-white/30">Connecting…</span>
             </div>
           )}
-          <GroupManagement
-            userId={userId!}
-            deviceId={deviceId!}
-            mlsClient={mlsClientRef.current}
-            onSelectGroup={handleSelectGroup}
-          />
-          <button onClick={handleLogout} style={{ marginTop: 20 }}>
-            Logout
-          </button>
-          <p style={{ marginTop: 16, fontSize: 12, color: '#888' }}>v{__APP_VERSION__}</p>
-        </div>
-      </>
+
+          <div className="flex-1 overflow-hidden">
+            <GroupManagement
+              userId={userId!}
+              deviceId={deviceId!}
+              mlsClient={mlsClientRef.current}
+              onSelectGroup={handleSelectGroup}
+            />
+          </div>
+        </aside>
+
+        {/* Main area placeholder */}
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-center space-y-2">
+            <Lock size={24} className="text-white/10 mx-auto" />
+            <p className="text-[13px] text-white/20">Select a group to start chatting</p>
+          </div>
+        </main>
+      </div>
     );
   }
 
@@ -289,20 +305,51 @@ const App: React.FC = () => {
 
   if (!currentMlsGroup || !mlsClientRef.current || !deliveryServiceRef.current) {
     return (
-      <>
+      <div className="min-h-screen bg-black text-white flex">
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-        <div style={{ maxWidth: 800, margin: '0 auto', padding: 20 }}>
-          <h1>Loading group...</h1>
-          <button onClick={handleBackToGroups}>← Back to Groups</button>
-        </div>
-      </>
+        <aside className="w-72 border-r border-white/10 h-screen flex flex-col">
+          <div className="h-14 border-b border-white/10 px-4 flex items-center">
+            <span className="text-sm font-medium">minimum.chat</span>
+          </div>
+        </aside>
+        <main className="flex-1 flex items-center justify-center">
+          <p className="text-[13px] text-white/20">Loading group…</p>
+        </main>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="min-h-screen bg-black text-white flex">
       <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+
+      {/* Sidebar */}
+      <aside className="w-72 border-r border-white/10 h-screen flex flex-col">
+        <div className="h-14 border-b border-white/10 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Lock size={12} className="text-white/20" />
+            <span className="text-sm font-medium">minimum.chat</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="p-1.5 text-white/30 hover:text-white transition-colors"
+            title="Log out"
+          >
+            <LogOut size={15} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <GroupManagement
+            userId={userId!}
+            deviceId={deviceId!}
+            mlsClient={mlsClientRef.current}
+            onSelectGroup={handleSelectGroup}
+          />
+        </div>
+      </aside>
+
+      {/* Chat area */}
+      <main className="flex-1 h-screen overflow-hidden">
         <Chat
           userId={userId!}
           deviceId={deviceId!}
@@ -312,8 +359,8 @@ const App: React.FC = () => {
           deliveryService={deliveryServiceRef.current}
           onBack={handleBackToGroups}
         />
-      </div>
-    </>
+      </main>
+    </div>
   );
 };
 
