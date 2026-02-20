@@ -169,8 +169,7 @@ export class MlsClient {
     try {
       return decrypt(group.groupId, ciphertext)
     } catch (error) {
-      console.error('MLS decryption failed:', error)
-      throw new Error(`MLS decryption failed: ${error}`)
+      throw new Error(`Decryption failed: ${error}`)
     }
   }
 

@@ -220,8 +220,9 @@ const Chat: React.FC<ChatProps> = ({
               });
             });
           } catch (error) {
-            if (String(error).includes('CannotDecryptOwnMessage')) {
-              // Own message echoed back by server — already shown as pending/sent, skip.
+            const errStr = String(error);
+            if (errStr.includes('CannotDecryptOwnMessage') || errStr.includes('WrongGroupId')) {
+              // Expected: own message echo or message from a stale MLS epoch — skip silently.
               return;
             }
             console.error('MLS decryption failed:', error);
