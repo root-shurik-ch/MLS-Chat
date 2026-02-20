@@ -5,9 +5,10 @@ import {
   isWebAuthnSupported,
   isPRFSupported,
 } from '../../utils/webauthn';
-import { generateDeviceId, decodeBase64Url } from '../../utils/crypto';
+import { generateDeviceId, decodeBase64Url, decryptString } from '../../utils/crypto';
 import { KeyManager } from '../../utils/keyManager';
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
+import { saveWasmState } from '../../utils/mlsGroupStorage';
 
 interface LoginFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
@@ -67,7 +68,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
 
       const webauthnGetResponse = serializeGetResponse(credential);
 
-      const { authToken, profile, mlsPublicKey, mlsPrivateKeyEnc } =
+      const { authToken, profile, mlsPublicKey, mlsPrivateKeyEnc, wasmStateEnc } =
         await authService.login({
           challengeId,
           userId: resolvedUserId,
@@ -83,6 +84,21 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         prfOutput,
         mlsPublicKeyBytes
       );
+
+      // If the server has a previously uploaded WASM state, decrypt and save it to
+      // IndexedDB so initializeServices can import it (enables cross-device history).
+      if (wasmStateEnc) {
+        try {
+          const kWasm = await keyManager.getKWasmState(resolvedUserId);
+          if (kWasm) {
+            const stateJson = await decryptString(wasmStateEnc, kWasm, resolvedUserId);
+            await saveWasmState(resolvedUserId, stateJson);
+            console.log('Restored WASM state from server');
+          }
+        } catch (e) {
+          console.warn('Failed to restore WASM state from server:', e);
+        }
+      }
 
       localStorage.setItem('userId', resolvedUserId);
       localStorage.setItem('deviceId', deviceId);

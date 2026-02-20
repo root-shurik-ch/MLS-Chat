@@ -7,7 +7,8 @@ import ConnectionStatus from './components/ConnectionStatus';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
-import { saveMlsGroup, loadAllMlsGroups, saveWasmState, loadWasmState, deleteWasmState } from './utils/mlsGroupStorage';
+import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteWasmState } from './utils/mlsGroupStorage';
+import { saveAndSyncWasmState } from './utils/wasmStateSync';
 
 type AppView = 'auth' | 'groups' | 'chat';
 
@@ -150,12 +151,12 @@ const App: React.FC = () => {
           newGroups.set(groupId, mlsGroup);
           setMlsGroups(newGroups);
 
-          // Persist group metadata and full WASM state
+          // Persist group metadata and full WASM state (local + remote)
           await saveMlsGroup(mlsGroup);
           if (userId) {
             try {
               const stateJson = await mlsClientRef.current.exportState();
-              await saveWasmState(userId, stateJson);
+              await saveAndSyncWasmState(userId, deviceId!, stateJson);
             } catch (e) {
               console.warn('Failed to save WASM state after group creation:', e);
             }

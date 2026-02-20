@@ -2,7 +2,7 @@
 // Uses IndexedDB for secure storage, never localStorage for private keys
 
 import { IndexedDBStorage } from './storage';
-import { deriveKEnc, decryptMlsPrivateKey } from './crypto';
+import { deriveKEnc, deriveKWasmState, decryptMlsPrivateKey } from './crypto';
 import { getPrfOutput } from './webauthn';
 
 export interface StoredKeys {
@@ -41,6 +41,7 @@ export class KeyManager {
     await this.keyStorage.set(`mlsPublicKey_${userId}_${deviceId}`, publicKeyStr);
     await this.keyStorage.set(`kEnc_${userId}_${deviceId}`, kEnc);
     await this.keyStorage.set(`userId_${deviceId}`, userId);
+    // kWasm is derived separately so callers can store it after login
   }
 
   // Retrieve keys for MLS operations
@@ -82,6 +83,7 @@ export class KeyManager {
   /**
    * Same as decryptAndStoreServerKey but uses pre-obtained PRF output
    * (e.g. from authenticatePasskeyDiscoverable) to avoid second auth prompt.
+   * Also derives and stores kWasm for encrypting/decrypting the WASM state blob.
    */
   async decryptAndStoreServerKeyWithPrf(
     encryptedKey: string,
@@ -91,12 +93,20 @@ export class KeyManager {
     mlsPublicKeyBytes?: Uint8Array
   ): Promise<void> {
     const kEnc = await deriveKEnc(prfOutput);
+    const kWasm = await deriveKWasmState(prfOutput);
     const mlsPrivateKey = await decryptMlsPrivateKey(encryptedKey, kEnc, userId);
     const mlsPublicKey =
       mlsPublicKeyBytes && mlsPublicKeyBytes.length > 0
         ? mlsPublicKeyBytes
         : await this.derivePublicKey(mlsPrivateKey);
     await this.storeKeys(userId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
+    // Store kWasm separately (keyed by userId only — shared across devices)
+    await this.keyStorage.set(`kWasm_${userId}`, kWasm);
+  }
+
+  /** Retrieve the WASM-state encryption key derived from passkey PRF. */
+  async getKWasmState(userId: string): Promise<CryptoKey | null> {
+    return (await this.keyStorage.get(`kWasm_${userId}`)) as CryptoKey | null;
   }
 
   // Mock public key derivation (replace with real MLS)

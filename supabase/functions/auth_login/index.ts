@@ -65,7 +65,7 @@ serve(async (req: Request) => {
 
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("user_id, passkey_credential_id, passkey_public_key, avatar_url")
+    .select("user_id, passkey_credential_id, passkey_public_key, avatar_url, wasm_state_enc")
     .eq("user_id", user_id)
     .single();
 
@@ -171,6 +171,7 @@ serve(async (req: Request) => {
       auth_token,
       mls_private_key_enc: device.mls_sk_enc,
       mls_public_key: device.mls_pk,
+      wasm_state_enc: user.wasm_state_enc ?? null,
       profile: {
         userId: user_id,
         displayName: user.user_id,

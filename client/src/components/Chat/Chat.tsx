@@ -4,7 +4,8 @@ import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase'
 import { MlsClient, MlsGroup } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
 import InviteLink from '../Group/InviteLink';
-import { saveWasmState, saveSentMessage, getSentMessage } from '../../utils/mlsGroupStorage';
+import { saveSentMessage, getSentMessage } from '../../utils/mlsGroupStorage';
+import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
 
 interface ChatProps {
   userId: string;
@@ -124,12 +125,9 @@ const Chat: React.FC<ChatProps> = ({
 
           // Save WASM state after history load — the ratchet has advanced
           if (parsed.length > 0 && mounted) {
-            const savedUserId = localStorage.getItem('userId');
-            if (savedUserId) {
-              mlsClient.exportState().then(stateJson =>
-                saveWasmState(savedUserId, stateJson)
-              ).catch(e => console.warn('Failed to save WASM state after history load:', e));
-            }
+            mlsClient.exportState().then(stateJson =>
+              saveAndSyncWasmState(userId, deviceId, stateJson)
+            ).catch(e => console.warn('Failed to save WASM state after history load:', e));
           }
         }
       } catch (e) {

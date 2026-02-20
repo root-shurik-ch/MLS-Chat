@@ -98,6 +98,7 @@ export class AuthServiceSupabase implements AuthService {
     profile: UserProfile;
     mlsPublicKey: string;
     mlsPrivateKeyEnc: string;
+    wasmStateEnc: string | null;
   }> {
     const response = await fetch(`${this.baseUrl}/auth_login`, {
       method: 'POST',
@@ -117,6 +118,7 @@ export class AuthServiceSupabase implements AuthService {
       profile?: UserProfile;
       mls_public_key?: string;
       mls_private_key_enc?: string;
+      wasm_state_enc?: string | null;
     };
     if (typeof data.auth_token !== 'string') {
       throw new Error('Invalid login response: missing auth_token');
@@ -135,6 +137,7 @@ export class AuthServiceSupabase implements AuthService {
       profile: data.profile,
       mlsPublicKey: data.mls_public_key,
       mlsPrivateKeyEnc: data.mls_private_key_enc,
+      wasmStateEnc: data.wasm_state_enc ?? null,
     };
   }
 
