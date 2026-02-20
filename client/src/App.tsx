@@ -7,7 +7,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
-import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteWasmState } from './utils/mlsGroupStorage';
+import { saveMlsGroup, loadAllMlsGroups, loadWasmState } from './utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from './utils/wasmStateSync';
 import { Lock, LogOut } from 'lucide-react';
 import { Button } from './components/ui/Button';
@@ -182,9 +182,11 @@ const App: React.FC = () => {
     mlsClientRef.current = null;
     setMlsGroups(new Map());
 
-    if (userId) {
-      deleteWasmState(userId).catch(() => {});
-    }
+    // Do NOT delete WASM state on logout — the state is keyed by userId and is
+    // needed to restore groups on the next login. Without it, all groups on this
+    // device become unrecoverable (the error "Encryption state could not be restored").
+    // Security: the state is IndexedDB-local, auth is gated by WebAuthn, and the
+    // auth token is cleared below, so no new messages can be fetched after logout.
 
     localStorage.clear();
     setUserId(null);
