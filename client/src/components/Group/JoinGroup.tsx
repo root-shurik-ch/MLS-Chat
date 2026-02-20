@@ -71,7 +71,9 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
       return;
     }
 
-    const { groupId: serverGroupId, welcome } = parsed;
+    const { groupId: serverGroupId, welcome: welcomeRaw } = parsed;
+    // Strip any whitespace that may have crept in during copy-paste
+    const welcome = welcomeRaw.replace(/\s+/g, '');
     const userId = localStorage.getItem('userId');
     const deviceId = localStorage.getItem('deviceId');
     if (!userId || !deviceId) {

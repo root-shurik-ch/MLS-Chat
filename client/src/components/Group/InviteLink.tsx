@@ -26,7 +26,8 @@ export const InviteLink: React.FC<InviteLinkProps> = ({
   const toast = useToastContext();
 
   const handleGenerateWelcome = async () => {
-    const kpHex = joinerKpHex.trim();
+    // Strip all whitespace — copied text may contain line-breaks from the display
+    const kpHex = joinerKpHex.replace(/\s+/g, '');
     if (!kpHex) {
       toast.warning('Paste the invite request code from the joiner first.');
       return;
