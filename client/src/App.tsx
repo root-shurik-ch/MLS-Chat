@@ -7,7 +7,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
-import { saveMlsGroup, loadAllMlsGroups, loadWasmState } from './utils/mlsGroupStorage';
+import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteMlsGroup } from './utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from './utils/wasmStateSync';
 import { Lock, LogOut } from 'lucide-react';
 import { Button } from './components/ui/Button';
@@ -124,8 +124,12 @@ const App: React.FC = () => {
         }
 
         if (!mlsGroup && storedGroup) {
-          toast.error('Encryption state for this group could not be restored. Try logging out and back in.');
-          return;
+          // WASM state is unrecoverable (likely deleted on a previous logout).
+          // Remove the stale record so we can reinitialize a fresh MLS state below.
+          // Old messages will not decrypt, but the group becomes usable again.
+          console.warn('WASM state unrecoverable for group, resetting local state:', groupId);
+          await deleteMlsGroup(storedGroup.id).catch(() => {});
+          toast.warning('Encryption state was reset. Old messages may not be visible.');
         }
 
         if (!mlsGroup) {
