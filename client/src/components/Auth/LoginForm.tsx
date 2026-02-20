@@ -50,7 +50,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         return;
       }
 
-      const deviceId = generateDeviceId();
+      const deviceId = localStorage.getItem('deviceId') || generateDeviceId();
       const authService = new AuthServiceSupabase(baseUrl);
       const keyManager = new KeyManager();
       await keyManager.init();

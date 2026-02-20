@@ -95,7 +95,7 @@ const Chat: React.FC<ChatProps> = ({
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
             // Cache the decrypted plaintext so re-entry doesn't need to re-decrypt
-            saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
+            await saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
               .catch(() => {});
             parsed.push({
               id: `msg_${m.server_seq}`,
@@ -111,11 +111,17 @@ const Chat: React.FC<ChatProps> = ({
               // MLS senders cannot decrypt their own ciphertext.
               // Look up the cached plaintext saved at send time.
               const cached = await getSentMessage(groupId, m.server_seq).catch(() => null);
+              const text = cached ?? '(your message — text unavailable on this device)';
+              // Cache so re-entry loads from cache instead of hitting MLS again
+              if (cached) {
+                await saveSentMessage(groupId, m.server_seq, text, m.sender_id, m.device_id, ts)
+                  .catch(() => {});
+              }
               parsed.push({
                 id: `msg_${m.server_seq}`,
                 senderId: m.sender_id,
                 deviceId: m.device_id,
-                text: cached ?? '(your message — text unavailable on this device)',
+                text,
                 timestamp: ts,
                 serverSeq: m.server_seq,
                 isSent: true,
