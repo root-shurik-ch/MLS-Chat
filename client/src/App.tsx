@@ -143,8 +143,16 @@ const App: React.FC = () => {
           }
         }
 
+        if (!mlsGroup && storedGroup) {
+          // Group existed before but WASM state could not be restored.
+          // Creating a new group would produce a different MLS group_id, breaking
+          // decryption of all existing messages. Show error and abort.
+          toast.error('Encryption state for this group could not be restored. Try logging out and back in.');
+          return;
+        }
+
         if (!mlsGroup) {
-          // Truly new group — create it
+          // Truly new group (no prior record in IndexedDB) — create it
           console.log('Creating MLS group:', groupId);
           mlsGroup = await mlsClientRef.current.createGroup(groupId);
           const newGroups = new Map(mlsGroups);

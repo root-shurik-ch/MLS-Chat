@@ -3,6 +3,8 @@
 export async function deriveKEnc(prfOutput: Uint8Array): Promise<CryptoKey> {
   const salt = new TextEncoder().encode("MLS-KDF-Salt");
   const info = new TextEncoder().encode("MLS-PrivateKey-Encryption");
+  // NOTE: keep "MLS-PrivateKey-Encryption" as info here — changing it
+  // would invalidate all existing mls_sk_enc values in the DB.
 
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -24,6 +26,70 @@ export async function deriveKEnc(prfOutput: Uint8Array): Promise<CryptoKey> {
     false,
     ['encrypt', 'decrypt']
   );
+}
+
+/**
+ * Derive the AES-256 key used to encrypt/decrypt the WASM state blob.
+ * Uses a different HKDF info string than deriveKEnc so the two keys are
+ * domain-separated — compromising one does not compromise the other.
+ * Output is the same on any device that authenticates with the same passkey.
+ */
+export async function deriveKWasmState(prfOutput: Uint8Array): Promise<CryptoKey> {
+  const salt = new TextEncoder().encode("MLS-KDF-Salt");
+  const info = new TextEncoder().encode("MLS-WasmState-Encryption");
+
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', prfOutput, 'HKDF', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt, info },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/**
+ * Encrypt an arbitrary UTF-8 string (e.g. JSON) with AES-256-GCM.
+ * Returns base64-encoded ciphertext||iv.
+ */
+export async function encryptString(
+  plaintext: string,
+  key: CryptoKey,
+  aad: string,
+): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = new TextEncoder().encode(plaintext);
+  const cipher = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(aad) },
+    key,
+    data,
+  );
+  const combined = new Uint8Array(new Uint8Array(cipher).length + 12);
+  combined.set(new Uint8Array(cipher));
+  combined.set(iv, new Uint8Array(cipher).length);
+  return btoa(String.fromCharCode(...combined));
+}
+
+/**
+ * Decrypt a string previously encrypted with encryptString.
+ */
+export async function decryptString(
+  encrypted: string,
+  key: CryptoKey,
+  aad: string,
+): Promise<string> {
+  const combined = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
+  const ciphertextLen = combined.length - 12;
+  const ciphertext = combined.slice(0, ciphertextLen);
+  const iv = combined.slice(ciphertextLen);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(aad) },
+    key,
+    ciphertext,
+  );
+  return new TextDecoder().decode(plaintext);
 }
 
 export async function encryptMlsPrivateKey(

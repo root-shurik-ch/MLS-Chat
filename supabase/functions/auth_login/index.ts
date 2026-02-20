@@ -69,7 +69,19 @@ serve(async (req: Request) => {
     .eq("user_id", user_id)
     .single();
 
-  if (userError || !user) {
+  if (userError) {
+    // PGRST116 = no rows returned (.single() found nothing) → genuine 404
+    // Any other error (e.g. unknown column, connection failure) → 500
+    const isNotFound = userError.code === "PGRST116";
+    return new Response(
+      JSON.stringify({ error: isNotFound ? "User not found" : "Database error" }),
+      {
+        status: isNotFound ? 404 : 500,
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+      }
+    );
+  }
+  if (!user) {
     return new Response(JSON.stringify({ error: "User not found" }), {
       status: 404,
       headers: { ...corsHeaders(req), "Content-Type": "application/json" },

@@ -52,7 +52,7 @@ export async function createPasskey(
     },
     user: {
       id: userIdBytes,
-      name: userId,
+      name: displayName,
       displayName: displayName
     },
     challenge: challengeBytes,

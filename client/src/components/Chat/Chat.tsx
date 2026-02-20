@@ -195,7 +195,11 @@ const Chat: React.FC<ChatProps> = ({
               });
             });
           } catch (error) {
-            console.error('Failed to decrypt message:', error);
+            if (String(error).includes('CannotDecryptOwnMessage')) {
+              // Own message echoed back by server — already shown as pending/sent, skip.
+              return;
+            }
+            console.error('MLS decryption failed:', error);
           }
         });
 
