@@ -61,6 +61,7 @@ const App: React.FC = () => {
   const deliveryServiceRef = useRef<DeliveryServiceSupabase | null>(null);
   const [mlsGroups, setMlsGroups] = useState<Map<string, MlsGroup>>(new Map());
   const [isConnecting, setIsConnecting] = useState(false);
+  const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const toast = useToastContext();
 
@@ -213,11 +214,19 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const startPendingPoll = useCallback((uid: string, did: string) => {
+    if (pendingPollRef.current) clearInterval(pendingPollRef.current);
+    pendingPollRef.current = setInterval(() => {
+      processPendingInvites(uid, did).catch(console.warn);
+    }, 30_000);
+  }, [processPendingInvites]);
+
   const handleAuthSuccess = async (uid: string, did: string) => {
     setUserId(uid);
     setDeviceId(did);
     await initializeServices(uid, did);
     processPendingInvites(uid, did).catch(console.warn);
+    startPendingPoll(uid, did);
     setView(pendingInviteId ? 'join' : 'groups');
   };
 
@@ -298,6 +307,10 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    if (pendingPollRef.current) {
+      clearInterval(pendingPollRef.current);
+      pendingPollRef.current = null;
+    }
     if (deliveryServiceRef.current) {
       deliveryServiceRef.current.disconnect();
       deliveryServiceRef.current = null;
@@ -330,6 +343,7 @@ const App: React.FC = () => {
         setDeviceId(savedDeviceId);
         await initializeServices(savedUserId, savedDeviceId);
         processPendingInvites(savedUserId, savedDeviceId).catch(console.warn);
+        startPendingPoll(savedUserId, savedDeviceId);
         setView(pendingInviteId ? 'join' : 'groups');
       }
     };
