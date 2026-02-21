@@ -7,26 +7,23 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   label?: string
 }
 
-const classNames = (...classes: Array<string | false | undefined>) =>
+const cx = (...classes: Array<string | false | undefined | null>) =>
   classes.filter(Boolean).join(' ')
 
-export const Button: React.FC<ButtonProps> = ({ variant = 'primary', children, label, ...rest }) => {
-  const base = ''
-  let btnClass = ''
+export const Button: React.FC<ButtonProps> = ({ variant = 'primary', children, label, className, ...rest }) => {
+  let base = 'cursor-pointer text-sm font-medium transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/30 disabled:cursor-not-allowed'
+  let variantClass = ''
 
   if (variant === 'primary') {
-    // Primary: black text on white background
-    btnClass = 'bg-white text-black hover:bg-white/90 px-4 py-2 transition-all'
+    variantClass = 'bg-white text-black hover:bg-white/90 active:bg-white/80 px-4 py-2 disabled:opacity-30'
   } else if (variant === 'ghost') {
-    // Ghost: transparent with a light border
-    btnClass = 'bg-transparent text-white border border-white/10 hover:bg-white/5'
+    variantClass = 'bg-transparent text-white/70 border border-white/10 hover:bg-white/5 hover:text-white active:bg-white/10 px-4 py-2 disabled:opacity-30'
   } else {
-    // Icon: compact icon button
-    btnClass = 'p-2 text-white/60 hover:text-white transition-colors'
+    variantClass = 'p-2 text-white/40 hover:text-white active:text-white/60 transition-colors disabled:opacity-20'
   }
 
   return (
-    <button className={classNames(base, btnClass)} {...rest}>
+    <button className={cx(base, variantClass, className)} {...rest}>
       {children ?? label}
     </button>
   )

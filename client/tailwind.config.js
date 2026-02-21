@@ -10,23 +10,27 @@ export default {
         background: "#000000",
         foreground: "#FFFFFF",
       },
-      opacity: {
-        '5': '0.05',
-        '10': '0.1',
-        '20': '0.2',
-        '30': '0.3',
-        '40': '0.4',
-        '60': '0.6',
-        '80': '0.8',
-        '90': '0.9',
-      },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', "Liberation Mono", "Courier New", 'monospace'],
+        sans: ['"Geist"', 'system-ui', 'sans-serif'],
+        mono: ['"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       letterSpacing: {
         widest: '0.2em',
-      }
+      },
+      animation: {
+        'fade-up': 'fadeUp 0.2s ease-out forwards',
+        'fade-in': 'fadeIn 0.15s ease-out forwards',
+      },
+      keyframes: {
+        fadeUp: {
+          '0%': { opacity: '0', transform: 'translateY(6px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+      },
     },
   },
   plugins: [],

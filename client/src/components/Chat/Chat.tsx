@@ -282,29 +282,33 @@ const Chat: React.FC<ChatProps> = ({
   return (
     <div className="flex flex-col h-full bg-black text-white">
       {/* Header */}
-      <div className="h-14 border-b border-white/10 px-4 flex items-center justify-between shrink-0">
+      <div className="h-14 border-b border-white/10 px-5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-1 text-white/40 hover:text-white transition-colors">
-            <ArrowLeft size={18} />
+          <button
+            onClick={onBack}
+            className="p-1 text-white/30 hover:text-white transition-colors"
+            aria-label="Back"
+          >
+            <ArrowLeft size={16} />
           </button>
-          <span className="text-sm font-medium">Group</span>
-          <span className="font-mono text-[11px] text-white/30">{groupId.substring(0, 8)}…</span>
+          <span className="text-[14px] font-medium text-white/90">Group</span>
+          <span className="font-mono text-[11px] text-white/25">{groupId.substring(0, 8)}</span>
         </div>
         <div className="flex items-center gap-3">
-          <Lock size={12} className="text-white/20" />
+          <Lock size={11} className="text-white/15" />
           <button
             onClick={() => setShowInvite(!showInvite)}
-            className="p-1.5 text-white/40 hover:text-white transition-colors"
+            className={`p-1.5 transition-colors ${showInvite ? 'text-white' : 'text-white/30 hover:text-white'}`}
             title="Invite member"
           >
-            <UserPlus size={16} />
+            <UserPlus size={15} />
           </button>
         </div>
       </div>
 
       {/* Invite panel */}
       {showInvite && (
-        <div className="border-b border-white/10 px-6 py-5 bg-white/[0.02]">
+        <div className="border-b border-white/10 px-6 py-5 bg-white/[0.02] animate-fade-in">
           <InviteLink
             groupId={groupId}
             mlsGroup={mlsGroup}
@@ -317,21 +321,33 @@ const Chat: React.FC<ChatProps> = ({
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-6">
+      <div className="flex-1 overflow-y-auto py-4">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2">
-            <Lock size={20} className="text-white/10" />
-            <p className="text-[13px] text-white/20">No messages yet</p>
+          <div className="flex flex-col items-center justify-center h-full gap-3">
+            <Lock size={18} className="text-white/8" />
+            <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">
+              end-to-end encrypted
+            </p>
           </div>
         ) : (
-          messages.map(msg => (
-            <div key={msg.id} className={`flex flex-col mb-6 px-6 group ${msg.isPending ? 'opacity-50' : ''}`}>
-              <div className="flex items-baseline space-x-2 mb-1">
-                <span className="font-semibold text-sm">{getSenderLabel(msg.senderId)}</span>
-                <span className="text-[10px] text-white/30">{formatTime(msg.timestamp)}</span>
-                {msg.isPending && <span className="text-[10px] text-white/20">sending…</span>}
+          messages.map((msg, i) => (
+            <div
+              key={msg.id}
+              className={`flex flex-col mb-5 px-6 animate-fade-up ${msg.isPending ? 'opacity-40' : ''}`}
+              style={{ animationDelay: `${Math.min(i * 20, 200)}ms` }}
+            >
+              <div className="flex items-baseline gap-2.5 mb-1">
+                <span className="text-[13px] font-semibold tracking-tight">
+                  {getSenderLabel(msg.senderId)}
+                </span>
+                <span className="font-mono text-[10px] text-white/25 tabular-nums">
+                  {formatTime(msg.timestamp)}
+                </span>
+                {msg.isPending && (
+                  <span className="font-mono text-[10px] text-white/20">sending…</span>
+                )}
               </div>
-              <div className="text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+              <div className="text-[15px] text-white/85 whitespace-pre-wrap leading-relaxed">
                 {msg.text}
               </div>
             </div>
@@ -341,24 +357,26 @@ const Chat: React.FC<ChatProps> = ({
       </div>
 
       {/* Input bar */}
-      <div className="p-4 border-t border-white/5 bg-black shrink-0">
+      <div className="px-5 py-4 border-t border-white/5 bg-black shrink-0">
         <div className="flex items-center gap-3">
+          <span className="font-mono text-[13px] text-white/20 shrink-0 select-none">›</span>
           <input
             type="text"
             name="message"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message…"
-            className="flex-1 bg-transparent border-b border-white/10 focus:border-white/40 py-2 px-0 outline-none transition-all text-[15px] placeholder:text-white/20"
+            placeholder="Message…"
+            className="flex-1 bg-transparent border-b border-white/8 focus:border-white/35 py-2.5 px-0 outline-none transition-colors duration-150 text-[15px] text-white placeholder:text-white/18 font-sans"
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             disabled={loading}
+            autoComplete="off"
           />
           <button
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            className="text-[13px] font-medium text-white/60 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+            className="font-mono text-[12px] text-white/40 hover:text-white disabled:opacity-15 disabled:cursor-not-allowed transition-colors uppercase tracking-widest shrink-0"
           >
-            {loading ? '…' : 'Send'}
+            {loading ? '…' : 'send'}
           </button>
         </div>
       </div>

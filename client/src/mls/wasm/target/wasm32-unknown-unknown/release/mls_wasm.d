@@ -1,1 +1,1 @@
-/Users/alexandra/min/client/src/mls/wasm/target/wasm32-unknown-unknown/release/mls_wasm.wasm: /Users/alexandra/min/client/src/mls/wasm/src/lib.rs
+/Users/alexandra/min/client/src/mls/wasm/target/wasm32-unknown-unknown/release/mls_wasm.wasm: /Users/alexandra/min/client/src/mls/wasm/src/lib.rs /Users/alexandra/min/client/src/mls/wasm/src/provider.rs /Users/alexandra/min/client/src/mls/wasm/src/storage.rs

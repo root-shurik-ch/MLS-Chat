@@ -136,9 +136,9 @@ export async function decryptMlsPrivateKey(
   const aad = new TextEncoder().encode(userId);
 
   const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: iv, additionalData: aad },
+    { name: "AES-GCM", iv: toArrayBuffer(iv), additionalData: toArrayBuffer(aad) },
     kEnc,
-    ciphertext
+    toArrayBuffer(ciphertext)
   );
 
   return new Uint8Array(plaintext);

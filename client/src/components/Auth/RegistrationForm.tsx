@@ -20,7 +20,6 @@ const NAME_MAX_LENGTH = 64;
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Lock } from 'lucide-react';
 
 interface RegistrationFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
@@ -132,23 +131,23 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="flex items-center gap-2 mb-1">
-        <Lock size={14} className="text-white/40" />
-        <span className="text-[11px] uppercase tracking-widest text-white/40">Create Account</span>
-      </div>
+      <p className="font-mono text-[10px] uppercase tracking-widest text-white/30">New account</p>
       <Input
         type="text"
         placeholder="Choose a unique name"
         value={displayName}
         onChange={(e) => setDisplayName(e.target.value)}
         required
-        className="text-white placeholder:text-white/20"
       />
-      <Button type="submit" variant="primary" disabled={loading} className="w-full disabled:opacity-40">
-        {loading ? 'Registering...' : 'Register with passkey'}
+      <Button type="submit" variant="primary" disabled={loading} className="w-full">
+        {loading ? (
+          <span className="cursor-blink">Generating keys</span>
+        ) : (
+          'Register with passkey'
+        )}
       </Button>
       {error && (
-        <p className="text-[13px] text-red-400/80">{error}</p>
+        <p className="font-mono text-[12px] text-red-400/70 leading-snug">{error}</p>
       )}
     </form>
   );

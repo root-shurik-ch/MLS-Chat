@@ -19,7 +19,6 @@ import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 import { saveWasmState } from '../../utils/mlsGroupStorage';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Lock } from 'lucide-react';
 
 interface LoginFormProps {
   onSuccess: (userId: string, deviceId: string) => void;
@@ -137,22 +136,22 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="flex items-center gap-2 mb-1">
-        <Lock size={14} className="text-white/40" />
-        <span className="text-[11px] uppercase tracking-widest text-white/40">Sign In</span>
-      </div>
+      <p className="font-mono text-[10px] uppercase tracking-widest text-white/30">Sign in</p>
       <Input
         type="text"
         placeholder="Your name"
         value={nameOrIdInput}
         onChange={(e) => setNameOrIdInput(e.target.value)}
-        className="text-white placeholder:text-white/20"
       />
-      <Button type="submit" variant="primary" disabled={loading} className="w-full disabled:opacity-40">
-        {loading ? 'Signing in...' : 'Sign in with passkey'}
+      <Button type="submit" variant="primary" disabled={loading} className="w-full">
+        {loading ? (
+          <span className="cursor-blink">Authenticating</span>
+        ) : (
+          'Sign in with passkey'
+        )}
       </Button>
       {error && (
-        <p className="text-[13px] text-red-400/80">{error}</p>
+        <p className="font-mono text-[12px] text-red-400/70 leading-snug">{error}</p>
       )}
     </form>
   );

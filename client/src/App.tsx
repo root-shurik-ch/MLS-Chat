@@ -254,43 +254,69 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-        <div className="w-full max-w-sm space-y-10">
-          {/* Header */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Lock size={16} className="text-white/40" />
-              <span className="font-mono text-[11px] text-white/30 uppercase tracking-widest">minimum.chat</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">End-to-end encrypted.</h1>
-            <p className="text-[13px] text-white/40 leading-relaxed">
-              Keys stay on your device. We store nothing but encrypted noise.
-            </p>
+      <div className="min-h-screen bg-black text-white flex">
+        {/* Left column — identity */}
+        <div className="hidden md:flex w-72 border-r border-white/8 flex-col justify-between p-8 shrink-0">
+          <div className="flex items-center gap-2">
+            <Lock size={11} className="text-white/25" />
+            <span className="font-mono text-[10px] text-white/25 uppercase tracking-widest">minimum.chat</span>
           </div>
-
-          {/* Saved session */}
-          {hasSavedSession && (
-            <div className="border border-white/10 p-4 space-y-3">
-              <p className="text-[13px] text-white/60">You have a saved session.</p>
-              <div className="flex gap-3">
-                <Button variant="primary" onClick={handleContinueSession} className="flex-1">
-                  Continue
-                </Button>
-                <Button variant="ghost" onClick={handleLogout} className="flex-1">
-                  Sign out
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Forms */}
           <div className="space-y-8">
-            <RegistrationForm onSuccess={handleAuthSuccess} />
-            <div className="border-t border-white/5" />
-            <LoginForm onSuccess={handleAuthSuccess} />
+            <div className="space-y-3.5">
+              {[
+                'Keys stay on your device.',
+                'We store only ciphertext.',
+                'MLS end-to-end encryption.',
+                'Open source.',
+              ].map((line, i) => (
+                <div key={i} className="flex items-start gap-2.5">
+                  <span className="font-mono text-[10px] text-white/18 mt-0.5 shrink-0 select-none">—</span>
+                  <span className="text-[13px] text-white/35 leading-snug">{line}</span>
+                </div>
+              ))}
+            </div>
+            <p className="font-mono text-[10px] text-white/12">v{__APP_VERSION__}</p>
           </div>
+        </div>
 
-          <p className="font-mono text-[10px] text-white/15">v{__APP_VERSION__}</p>
+        {/* Right column — forms */}
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="w-full max-w-xs space-y-10 animate-fade-up">
+            <div className="flex items-center gap-2 md:hidden">
+              <Lock size={11} className="text-white/30" />
+              <span className="font-mono text-[10px] text-white/30 uppercase tracking-widest">minimum.chat</span>
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="text-[22px] font-semibold tracking-tight leading-tight">
+                Encrypted by default.
+              </h1>
+              <p className="text-[13px] text-white/30 leading-relaxed">
+                No keys stored on servers. No exceptions.
+              </p>
+            </div>
+
+            {hasSavedSession && (
+              <div className="border border-white/10 p-4 space-y-3 animate-fade-in">
+                <p className="font-mono text-[10px] text-white/35 uppercase tracking-widest">Session found</p>
+                <p className="text-[13px] text-white/55">{savedUserId}</p>
+                <div className="flex gap-2 pt-1">
+                  <Button variant="primary" onClick={handleContinueSession} className="flex-1">
+                    Continue
+                  </Button>
+                  <Button variant="ghost" onClick={handleLogout} className="flex-1">
+                    Sign out
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-8">
+              <RegistrationForm onSuccess={handleAuthSuccess} />
+              <div className="h-px bg-white/5" />
+              <LoginForm onSuccess={handleAuthSuccess} />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -303,24 +329,24 @@ const App: React.FC = () => {
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
 
         {/* Sidebar */}
-        <aside className="w-72 border-r border-white/10 h-screen flex flex-col">
-          <div className="h-14 border-b border-white/10 px-4 flex items-center justify-between">
+        <aside className="w-68 border-r border-white/8 h-screen flex flex-col shrink-0" style={{ width: '17rem' }}>
+          <div className="h-14 border-b border-white/8 px-5 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
-              <Lock size={12} className="text-white/20" />
-              <span className="text-sm font-medium">minimum.chat</span>
+              <Lock size={11} className="text-white/20" />
+              <span className="font-mono text-[11px] text-white/30 tracking-widest uppercase">minimum.chat</span>
             </div>
             <button
               onClick={handleLogout}
-              className="p-1.5 text-white/30 hover:text-white transition-colors"
+              className="p-1.5 text-white/25 hover:text-white/70 transition-colors"
               title="Log out"
             >
-              <LogOut size={15} />
+              <LogOut size={14} />
             </button>
           </div>
 
           {isConnecting && (
-            <div className="px-4 py-2 border-b border-white/5">
-              <span className="text-[11px] text-white/30">Connecting…</span>
+            <div className="px-5 py-2 border-b border-white/5">
+              <span className="font-mono text-[10px] text-white/25 uppercase tracking-widest">connecting…</span>
             </div>
           )}
 
@@ -336,9 +362,9 @@ const App: React.FC = () => {
 
         {/* Main area placeholder */}
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-center space-y-2">
-            <Lock size={24} className="text-white/10 mx-auto" />
-            <p className="text-[13px] text-white/20">Select a group to start chatting</p>
+          <div className="text-center space-y-3">
+            <Lock size={16} className="text-white/8 mx-auto" />
+            <p className="font-mono text-[11px] text-white/18 uppercase tracking-widest">Select a group</p>
           </div>
         </main>
       </div>
@@ -348,17 +374,39 @@ const App: React.FC = () => {
   // Chat view
   const currentMlsGroup = currentGroupId ? mlsGroups.get(currentGroupId) : null;
 
+  const SidebarShell = () => (
+    <aside className="border-r border-white/8 h-screen flex flex-col shrink-0" style={{ width: '17rem' }}>
+      <div className="h-14 border-b border-white/8 px-5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Lock size={11} className="text-white/20" />
+          <span className="font-mono text-[11px] text-white/30 tracking-widest uppercase">minimum.chat</span>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="p-1.5 text-white/25 hover:text-white/70 transition-colors"
+          title="Log out"
+        >
+          <LogOut size={14} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <GroupManagement
+          userId={userId!}
+          deviceId={deviceId!}
+          mlsClient={mlsClientRef.current}
+          onSelectGroup={handleSelectGroup}
+        />
+      </div>
+    </aside>
+  );
+
   if (!currentMlsGroup || !mlsClientRef.current || !deliveryServiceRef.current) {
     return (
       <div className="min-h-screen bg-black text-white flex">
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-        <aside className="w-72 border-r border-white/10 h-screen flex flex-col">
-          <div className="h-14 border-b border-white/10 px-4 flex items-center">
-            <span className="text-sm font-medium">minimum.chat</span>
-          </div>
-        </aside>
+        <SidebarShell />
         <main className="flex-1 flex items-center justify-center">
-          <p className="text-[13px] text-white/20">Loading group…</p>
+          <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">Loading…</p>
         </main>
       </div>
     );
@@ -367,32 +415,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-black text-white flex">
       <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-
-      {/* Sidebar */}
-      <aside className="w-72 border-r border-white/10 h-screen flex flex-col">
-        <div className="h-14 border-b border-white/10 px-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Lock size={12} className="text-white/20" />
-            <span className="text-sm font-medium">minimum.chat</span>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="p-1.5 text-white/30 hover:text-white transition-colors"
-            title="Log out"
-          >
-            <LogOut size={15} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <GroupManagement
-            userId={userId!}
-            deviceId={deviceId!}
-            mlsClient={mlsClientRef.current}
-            onSelectGroup={handleSelectGroup}
-          />
-        </div>
-      </aside>
-
+      <SidebarShell />
       {/* Chat area */}
       <main className="flex-1 h-screen overflow-hidden">
         <Chat

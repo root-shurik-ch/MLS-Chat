@@ -98,19 +98,18 @@ const CreateGroupForm: React.FC<CreateGroupFormProps> = ({ mlsClient, onSuccess 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <p className="text-[11px] uppercase tracking-widest text-white/40">New Group</p>
+      <p className="font-mono text-[10px] uppercase tracking-widest text-white/30">New group</p>
       <Input
         type="text"
         placeholder="Group name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         required
-        className="text-white placeholder:text-white/20"
       />
-      <Button type="submit" variant="primary" disabled={loading} className="w-full disabled:opacity-40">
-        {loading ? 'Creating...' : 'Create Group'}
+      <Button type="submit" variant="primary" disabled={loading} className="w-full">
+        {loading ? 'Creating…' : 'Create'}
       </Button>
-      {error && <p className="text-[13px] text-red-400/80">{error}</p>}
+      {error && <p className="font-mono text-[12px] text-red-400/70">{error}</p>}
     </form>
   );
 };
