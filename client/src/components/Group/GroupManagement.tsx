@@ -158,32 +158,35 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Group list */}
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex flex-col h-full min-h-0">
+      {/* Group list — scrollable, with iOS scroll momentum */}
+      <div className="flex-1 overflow-y-auto min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
         {groups.length === 0 ? (
-          <div className="px-5 py-10 text-center">
+          <div className="px-5 py-12 text-center">
             <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">No groups</p>
           </div>
         ) : (
           groups.map(group => (
             <div
               key={group.groupId}
-              className="group flex items-center justify-between px-5 py-3.5 hover:bg-white/5 cursor-pointer transition-colors border-b border-white/5"
+              className="group flex items-center justify-between px-5 hover:bg-white/5 active:bg-white/[0.08] cursor-pointer transition-colors border-b border-white/5"
+              style={{ minHeight: '52px' }}  /* ≥44px touch target */
               onClick={() => onSelectGroup(group.groupId)}
             >
-              <span className="text-[14px] font-medium text-white/80 group-hover:text-white transition-colors truncate">
+              <span className="text-[15px] font-medium text-white/80 group-hover:text-white transition-colors truncate py-3.5">
                 {group.name}
               </span>
-              <div className="flex items-center gap-2 shrink-0 ml-2">
-                <span className="font-mono text-[10px] text-white/20">{group.groupId.substring(0, 6)}</span>
+              <div className="flex items-center gap-1 shrink-0 ml-2">
+                <span className="font-mono text-[10px] text-white/18 hidden sm:inline">
+                  {group.groupId.substring(0, 6)}
+                </span>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.groupId); }}
                   disabled={deletingGroupId === group.groupId}
-                  className="p-1 text-white/20 hover:text-white/50 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-20"
+                  className="p-2.5 text-white/20 hover:text-white/50 active:text-white/70 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-20"
                   title="Delete group"
                 >
-                  <Trash2 size={11} />
+                  <Trash2 size={12} />
                 </button>
               </div>
             </div>
@@ -193,7 +196,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
 
       {/* Create/Join forms */}
       {showCreateForm && (
-        <div className="border-t border-white/10 p-4 animate-fade-in">
+        <div className="border-t border-white/8 p-4 animate-fade-in">
           <CreateGroupForm mlsClient={mlsClient} onSuccess={handleGroupCreated} />
           <button
             onClick={() => setShowCreateForm(false)}
@@ -205,7 +208,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       )}
 
       {showJoinForm && mlsClient && (
-        <div className="border-t border-white/10 p-4 animate-fade-in">
+        <div className="border-t border-white/8 p-4 animate-fade-in overflow-y-auto max-h-[60vh]">
           <JoinGroup mlsClient={mlsClient} onJoinSuccess={handleJoinSuccess} />
           <button
             onClick={() => setShowJoinForm(false)}
@@ -216,24 +219,27 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         </div>
       )}
 
-      {/* Action buttons */}
+      {/* Action buttons — safe area bottom for iOS */}
       {!showCreateForm && !showJoinForm && (
-        <div className="border-t border-white/10 p-3 flex gap-2">
+        <div
+          className="border-t border-white/8 px-3 pt-2.5 flex gap-2"
+          style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}
+        >
           <Button
             variant="ghost"
             onClick={() => setShowCreateForm(true)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px]"
+            className="flex-1 flex items-center justify-center gap-1.5 py-3 text-[13px]"
           >
-            <Plus size={12} />
-            New
+            <Plus size={13} />
+            New group
           </Button>
           {mlsClient && (
             <Button
               variant="ghost"
               onClick={() => setShowJoinForm(true)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px]"
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 text-[13px]"
             >
-              <LogIn size={12} />
+              <LogIn size={13} />
               Join
             </Button>
           )}

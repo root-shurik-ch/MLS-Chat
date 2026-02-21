@@ -254,7 +254,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="min-h-screen bg-black text-white flex">
+      <div className="h-dvh bg-black text-white flex overflow-auto">
         {/* Left column — identity */}
         <div className="hidden md:flex w-72 border-r border-white/8 flex-col justify-between p-8 shrink-0">
           <div className="flex items-center gap-2">
@@ -322,46 +322,56 @@ const App: React.FC = () => {
     );
   }
 
-  // Groups view — sidebar layout
+  // ── Sidebar (reused in both groups & chat views on desktop) ──────────────
+  const Sidebar = ({ fullWidthOnMobile = false }: { fullWidthOnMobile?: boolean }) => (
+    <aside className={[
+      'flex flex-col h-full bg-black',
+      fullWidthOnMobile
+        // groups view: full width on mobile, fixed sidebar on desktop
+        ? 'w-full md:w-[17rem] md:shrink-0 md:border-r md:border-white/8'
+        // chat view: hidden on mobile, sidebar on desktop
+        : 'hidden md:flex md:w-[17rem] md:shrink-0 md:border-r md:border-white/8',
+    ].join(' ')}>
+      <div className="h-14 border-b border-white/8 px-5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Lock size={11} className="text-white/20" />
+          <span className="font-mono text-[11px] text-white/30 tracking-widest uppercase">minimum.chat</span>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="p-2.5 -mr-1.5 text-white/25 hover:text-white/70 transition-colors"
+          title="Log out"
+        >
+          <LogOut size={14} />
+        </button>
+      </div>
+
+      {isConnecting && (
+        <div className="px-5 py-2 border-b border-white/5">
+          <span className="font-mono text-[10px] text-white/25 uppercase tracking-widest">connecting…</span>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-hidden min-h-0">
+        <GroupManagement
+          userId={userId!}
+          deviceId={deviceId!}
+          mlsClient={mlsClientRef.current}
+          onSelectGroup={handleSelectGroup}
+        />
+      </div>
+    </aside>
+  );
+
+  // Groups view
+  // Mobile: full-screen list | Desktop: sidebar + placeholder
   if (view === 'groups') {
     return (
-      <div className="min-h-screen bg-black text-white flex">
+      <div className="h-dvh bg-black text-white flex overflow-hidden">
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-
-        {/* Sidebar */}
-        <aside className="w-68 border-r border-white/8 h-screen flex flex-col shrink-0" style={{ width: '17rem' }}>
-          <div className="h-14 border-b border-white/8 px-5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <Lock size={11} className="text-white/20" />
-              <span className="font-mono text-[11px] text-white/30 tracking-widest uppercase">minimum.chat</span>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="p-1.5 text-white/25 hover:text-white/70 transition-colors"
-              title="Log out"
-            >
-              <LogOut size={14} />
-            </button>
-          </div>
-
-          {isConnecting && (
-            <div className="px-5 py-2 border-b border-white/5">
-              <span className="font-mono text-[10px] text-white/25 uppercase tracking-widest">connecting…</span>
-            </div>
-          )}
-
-          <div className="flex-1 overflow-hidden">
-            <GroupManagement
-              userId={userId!}
-              deviceId={deviceId!}
-              mlsClient={mlsClientRef.current}
-              onSelectGroup={handleSelectGroup}
-            />
-          </div>
-        </aside>
-
-        {/* Main area placeholder */}
-        <main className="flex-1 flex items-center justify-center">
+        <Sidebar fullWidthOnMobile />
+        {/* Desktop-only placeholder */}
+        <main className="hidden md:flex flex-1 items-center justify-center">
           <div className="text-center space-y-3">
             <Lock size={16} className="text-white/8 mx-auto" />
             <p className="font-mono text-[11px] text-white/18 uppercase tracking-widest">Select a group</p>
@@ -374,37 +384,11 @@ const App: React.FC = () => {
   // Chat view
   const currentMlsGroup = currentGroupId ? mlsGroups.get(currentGroupId) : null;
 
-  const SidebarShell = () => (
-    <aside className="border-r border-white/8 h-screen flex flex-col shrink-0" style={{ width: '17rem' }}>
-      <div className="h-14 border-b border-white/8 px-5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <Lock size={11} className="text-white/20" />
-          <span className="font-mono text-[11px] text-white/30 tracking-widest uppercase">minimum.chat</span>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="p-1.5 text-white/25 hover:text-white/70 transition-colors"
-          title="Log out"
-        >
-          <LogOut size={14} />
-        </button>
-      </div>
-      <div className="flex-1 overflow-hidden">
-        <GroupManagement
-          userId={userId!}
-          deviceId={deviceId!}
-          mlsClient={mlsClientRef.current}
-          onSelectGroup={handleSelectGroup}
-        />
-      </div>
-    </aside>
-  );
-
   if (!currentMlsGroup || !mlsClientRef.current || !deliveryServiceRef.current) {
     return (
-      <div className="min-h-screen bg-black text-white flex">
+      <div className="h-dvh bg-black text-white flex overflow-hidden">
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-        <SidebarShell />
+        <Sidebar />
         <main className="flex-1 flex items-center justify-center">
           <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">Loading…</p>
         </main>
@@ -412,12 +396,12 @@ const App: React.FC = () => {
     );
   }
 
+  // Mobile: full-screen chat | Desktop: sidebar + chat
   return (
-    <div className="min-h-screen bg-black text-white flex">
+    <div className="h-dvh bg-black text-white flex overflow-hidden">
       <ConnectionStatus deliveryService={deliveryServiceRef.current} />
-      <SidebarShell />
-      {/* Chat area */}
-      <main className="flex-1 h-screen overflow-hidden">
+      <Sidebar />
+      <main className="flex-1 h-full overflow-hidden">
         <Chat
           userId={userId!}
           deviceId={deviceId!}

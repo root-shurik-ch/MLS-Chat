@@ -282,26 +282,29 @@ const Chat: React.FC<ChatProps> = ({
   return (
     <div className="flex flex-col h-full bg-black text-white">
       {/* Header */}
-      <div className="h-14 border-b border-white/10 px-5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="h-14 border-b border-white/8 px-4 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1">
+          {/* Back button — prominent on mobile, subtle on desktop */}
           <button
             onClick={onBack}
-            className="p-1 text-white/30 hover:text-white transition-colors"
-            aria-label="Back"
+            className="p-2.5 -ml-1.5 text-white/40 hover:text-white active:text-white/60 transition-colors md:text-white/25"
+            aria-label="Back to groups"
           >
-            <ArrowLeft size={16} />
+            <ArrowLeft size={18} />
           </button>
           <span className="text-[14px] font-medium text-white/90">Group</span>
-          <span className="font-mono text-[11px] text-white/25">{groupId.substring(0, 8)}</span>
+          <span className="font-mono text-[11px] text-white/20 ml-1.5 hidden sm:inline">
+            {groupId.substring(0, 8)}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          <Lock size={11} className="text-white/15" />
+        <div className="flex items-center gap-1">
+          <Lock size={10} className="text-white/12 hidden sm:block" />
           <button
             onClick={() => setShowInvite(!showInvite)}
-            className={`p-1.5 transition-colors ${showInvite ? 'text-white' : 'text-white/30 hover:text-white'}`}
+            className={`p-2.5 -mr-1.5 transition-colors ${showInvite ? 'text-white' : 'text-white/30 hover:text-white'}`}
             title="Invite member"
           >
-            <UserPlus size={15} />
+            <UserPlus size={16} />
           </button>
         </div>
       </div>
@@ -356,25 +359,30 @@ const Chat: React.FC<ChatProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input bar */}
-      <div className="px-5 py-4 border-t border-white/5 bg-black shrink-0">
+      {/* Input bar — safe area padding for iOS notch/home indicator */}
+      <div
+        className="px-4 pt-3 border-t border-white/5 bg-black shrink-0"
+        style={{ paddingBottom: 'max(0.875rem, env(safe-area-inset-bottom))' }}
+      >
         <div className="flex items-center gap-3">
-          <span className="font-mono text-[13px] text-white/20 shrink-0 select-none">›</span>
+          <span className="font-mono text-[13px] text-white/18 shrink-0 select-none">›</span>
           <input
             type="text"
             name="message"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Message…"
-            className="flex-1 bg-transparent border-b border-white/8 focus:border-white/35 py-2.5 px-0 outline-none transition-colors duration-150 text-[15px] text-white placeholder:text-white/18 font-sans"
+            className="flex-1 bg-transparent border-b border-white/8 focus:border-white/35 py-3 px-0 outline-none transition-colors duration-150 text-[16px] md:text-[15px] text-white placeholder:text-white/18 font-sans"
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             disabled={loading}
             autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
           <button
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            className="font-mono text-[12px] text-white/40 hover:text-white disabled:opacity-15 disabled:cursor-not-allowed transition-colors uppercase tracking-widest shrink-0"
+            className="p-1.5 -mr-1 font-mono text-[11px] text-white/35 hover:text-white active:text-white/60 disabled:opacity-15 disabled:cursor-not-allowed transition-colors uppercase tracking-widest shrink-0"
           >
             {loading ? '…' : 'send'}
           </button>
