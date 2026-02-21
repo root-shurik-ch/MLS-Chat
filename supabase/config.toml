@@ -16,3 +16,21 @@ entrypoint = "./functions/auth_login/index.ts"
 
 [functions.auth_keypackage]
 entrypoint = "./functions/auth_keypackage/index.ts"
+
+[functions.invite_create]
+entrypoint = "./functions/invite_create/index.ts"
+
+[functions.invite_info]
+entrypoint = "./functions/invite_info/index.ts"
+
+[functions.invite_join]
+entrypoint = "./functions/invite_join/index.ts"
+
+[functions.invite_complete]
+entrypoint = "./functions/invite_complete/index.ts"
+
+[functions.invite_poll]
+entrypoint = "./functions/invite_poll/index.ts"
+
+[functions.invite_pending]
+entrypoint = "./functions/invite_pending/index.ts"

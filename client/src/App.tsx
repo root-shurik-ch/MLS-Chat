@@ -4,6 +4,7 @@ import LoginForm from './components/Auth/LoginForm';
 import GroupManagement from './components/Group/GroupManagement';
 import Chat from './components/Chat/Chat';
 import ConnectionStatus from './components/ConnectionStatus';
+import InviteJoinView from './components/Group/InviteJoinView';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
@@ -14,7 +15,7 @@ import { Lock, LogOut } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import type { GroupMeta } from './domain/Group';
 
-type AppView = 'auth' | 'groups' | 'chat';
+type AppView = 'auth' | 'groups' | 'chat' | 'join';
 
 async function fetchUserGroupsFromServer(userId: string, deviceId: string): Promise<GroupMeta[]> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -46,6 +47,11 @@ async function fetchUserGroupsFromServer(userId: string, deviceId: string): Prom
 }
 
 const App: React.FC = () => {
+  // Parse ?join=<invite_id> from URL on first render (before any auth)
+  const [pendingInviteId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('join')
+  );
+
   const [view, setView] = useState<AppView>('auth');
   const [userId, setUserId] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
@@ -134,11 +140,85 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleAuthSuccess = async (userId: string, deviceId: string) => {
-    setUserId(userId);
-    setDeviceId(deviceId);
-    setView('groups');
-    await initializeServices(userId, deviceId);
+  // Process any pending invites where this user is the inviter (kp_submitted status).
+  // Runs silently in the background after login.
+  const processPendingInvites = useCallback(async (uid: string, did: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+    const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
+    if (!supabaseUrl || !mlsClientRef.current) return;
+
+    const authToken = localStorage.getItem('authToken') ?? anonKey;
+    const headers = {
+      'Content-Type': 'application/json',
+      'apikey': anonKey,
+      'Authorization': `Bearer ${authToken}`,
+    };
+
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/invite_pending`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ user_id: uid, device_id: did }),
+      });
+      const data = await res.json() as { invites?: Array<{ invite_id: string; group_id: string; kp_hex: string }> };
+      const pending = data.invites ?? [];
+      if (pending.length === 0) return;
+
+      for (const invite of pending) {
+        try {
+          const storedGroups = await loadAllMlsGroups();
+          const stored = storedGroups.find(g => g.id === invite.group_id);
+          if (!stored || !mlsClientRef.current) continue;
+
+          let mlsGroup: MlsGroup | undefined;
+          try {
+            mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
+          } catch {
+            const stateJson = await loadWasmState(uid);
+            if (stateJson && mlsClientRef.current) {
+              await mlsClientRef.current.importState(stateJson);
+              mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
+            }
+          }
+          if (!mlsGroup || !mlsClientRef.current) continue;
+
+          // addMember via WASM
+          const kp = { data: invite.kp_hex, signature: '', hpkePublicKey: '', credential: '', extensions: {} as Record<string, unknown> };
+          const result = await mlsClientRef.current.addMember(mlsGroup, kp);
+          if (!result.welcome) continue;
+
+          // Deliver welcome
+          await fetch(`${supabaseUrl}/functions/v1/invite_complete`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              invite_id: invite.invite_id,
+              user_id: uid,
+              device_id: did,
+              welcome_hex: result.welcome,
+            }),
+          });
+
+          // Persist updated WASM state
+          const stateJson = await mlsClientRef.current.exportState();
+          await saveAndSyncWasmState(uid, did, stateJson);
+
+          console.log('[App] Processed pending invite:', invite.invite_id);
+        } catch (e) {
+          console.warn('[App] Failed to process invite:', invite.invite_id, e);
+        }
+      }
+    } catch (e) {
+      console.warn('[App] Failed to check pending invites:', e);
+    }
+  }, []);
+
+  const handleAuthSuccess = async (uid: string, did: string) => {
+    setUserId(uid);
+    setDeviceId(did);
+    await initializeServices(uid, did);
+    processPendingInvites(uid, did).catch(console.warn);
+    setView(pendingInviteId ? 'join' : 'groups');
   };
 
   const handleSelectGroup = async (groupId: string) => {
@@ -244,12 +324,13 @@ const App: React.FC = () => {
     const savedDeviceId = typeof window !== 'undefined' ? localStorage.getItem('deviceId') : null;
     const hasSavedSession = !!(savedUserId && savedDeviceId);
 
-    const handleContinueSession = () => {
+    const handleContinueSession = async () => {
       if (savedUserId && savedDeviceId) {
         setUserId(savedUserId);
         setDeviceId(savedDeviceId);
-        setView('groups');
-        initializeServices(savedUserId, savedDeviceId);
+        await initializeServices(savedUserId, savedDeviceId);
+        processPendingInvites(savedUserId, savedDeviceId).catch(console.warn);
+        setView(pendingInviteId ? 'join' : 'groups');
       }
     };
 
@@ -289,10 +370,12 @@ const App: React.FC = () => {
 
             <div className="space-y-2">
               <h1 className="text-[22px] font-semibold tracking-tight leading-tight">
-                Encrypted by default.
+                {pendingInviteId ? 'Log in to join the group.' : 'Encrypted by default.'}
               </h1>
               <p className="text-[13px] text-white/30 leading-relaxed">
-                No keys stored on servers. No exceptions.
+                {pendingInviteId
+                  ? 'You have a group invite. Sign in or create an account to continue.'
+                  : 'No keys stored on servers. No exceptions.'}
               </p>
             </div>
 
@@ -318,6 +401,27 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  // Join view — shown after login when ?join=<id> was in the URL
+  if (view === 'join' && pendingInviteId && userId && deviceId && mlsClientRef.current) {
+    return (
+      <div className="h-dvh bg-black text-white flex items-center justify-center p-8">
+        <InviteJoinView
+          inviteId={pendingInviteId}
+          userId={userId}
+          deviceId={deviceId}
+          mlsClient={mlsClientRef.current}
+          onSuccess={(groupId) => {
+            // Clear the ?join= param from the URL bar
+            const url = new URL(window.location.href);
+            url.searchParams.delete('join');
+            window.history.replaceState({}, '', url.toString());
+            handleSelectGroup(groupId);
+          }}
+        />
       </div>
     );
   }

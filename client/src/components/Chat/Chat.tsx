@@ -314,11 +314,10 @@ const Chat: React.FC<ChatProps> = ({
         <div className="border-b border-white/10 px-6 py-5 bg-white/[0.02] animate-fade-in">
           <InviteLink
             groupId={groupId}
+            userId={userId}
+            deviceId={deviceId}
             mlsGroup={mlsGroup}
             mlsClient={mlsClient}
-            onInviteGenerated={(welcome) => {
-              console.log('Welcome generated:', welcome.substring(0, 50) + '...');
-            }}
           />
         </div>
       )}

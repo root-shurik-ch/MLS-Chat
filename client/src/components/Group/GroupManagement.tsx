@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { GroupMeta } from '../../domain/Group';
-import JoinGroup from './JoinGroup';
 import CreateGroupForm from './CreateGroupForm';
 import { MlsClient } from '../../mls/index';
 import { IndexedDBStorage } from '../../utils/storage';
 import { deleteMlsGroup, loadAllMlsGroups } from '../../utils/mlsGroupStorage';
-import { Plus, LogIn, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface GroupManagementProps {
@@ -68,7 +67,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
 }) => {
   const [groups, setGroups] = useState<GroupMeta[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showJoinForm, setShowJoinForm] = useState(false);
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
@@ -102,12 +100,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   useEffect(() => {
     loadGroups();
   }, [loadGroups]);
-
-  const handleJoinSuccess = async (groupId: string) => {
-    setShowJoinForm(false);
-    await loadGroups();
-    onSelectGroup(groupId);
-  };
 
   const handleGroupCreated = async () => {
     setShowCreateForm(false);
@@ -207,20 +199,8 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         </div>
       )}
 
-      {showJoinForm && mlsClient && (
-        <div className="border-t border-white/8 p-4 animate-fade-in overflow-y-auto max-h-[60vh]">
-          <JoinGroup mlsClient={mlsClient} onJoinSuccess={handleJoinSuccess} />
-          <button
-            onClick={() => setShowJoinForm(false)}
-            className="mt-3 font-mono text-[11px] text-white/25 hover:text-white/50 transition-colors uppercase tracking-widest"
-          >
-            cancel
-          </button>
-        </div>
-      )}
-
       {/* Action buttons — safe area bottom for iOS */}
-      {!showCreateForm && !showJoinForm && (
+      {!showCreateForm && (
         <div
           className="border-t border-white/8 px-3 pt-2.5 flex gap-2"
           style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}
@@ -233,16 +213,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
             <Plus size={13} />
             New group
           </Button>
-          {mlsClient && (
-            <Button
-              variant="ghost"
-              onClick={() => setShowJoinForm(true)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-3 text-[13px]"
-            >
-              <LogIn size={13} />
-              Join
-            </Button>
-          )}
         </div>
       )}
     </div>

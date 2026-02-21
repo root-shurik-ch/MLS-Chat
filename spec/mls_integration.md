@@ -59,8 +59,8 @@ WASM: load_group(group_id_hex) → MlsGroup::load(storage, group_id) → GROUPS 
 | Event | Where |
 |---|---|
 | Group created (`create_group`) | `App.tsx` `handleSelectGroup` |
-| Group joined via invite (`process_welcome`) | `JoinGroup.tsx` |
-| Invite generated (`add_member`) | `InviteLink.tsx` |
+| Group joined via invite (`process_welcome`) | `InviteJoinView.tsx` |
+| Invite generated (`add_member`) | `InviteLink.tsx` and `App.tsx` `processPendingInvites` |
 | Bulk history decrypted | `Chat.tsx` `loadHistory` effect |
 
 State is NOT saved after individual encrypt/decrypt in real-time chat (performance). The ratchet position after the last history load is the restore point.
@@ -76,16 +76,18 @@ In `App.tsx` `initializeServices`:
 
 ## IndexedDB Schema
 
-Database: `MlsChatGroups`, version **3**
+Database: `MlsChatGroups`, version **4**
 
 | Store | Key (keyPath) | Fields | Notes |
 |---|---|---|---|
 | `groups` | `id` (app UUID) | `id`, `groupId` (MLS hex), `epoch`, `treeHash`, `epochAuthenticator`, `lastUpdated` | Group metadata; `id` = app UUID used throughout the app; `groupId` = internal MLS group ID hex used for WASM calls |
 | `wasm_state` | `userId` | `userId`, `stateJson`, `lastUpdated` | Full serialized WASM state; one record per user |
+| `sent_messages` | `id` (`groupId:serverSeq`) | `id`, `groupId`, `serverSeq`, `text`, `senderId`, `deviceId`, `timestamp` | Plaintext cache of sent messages (MLS senders cannot re-decrypt own ciphertext from history) |
 
 **Migration history:**
 - v1 → v2: `groups` store keyPath changed from `'groupId'` to `'id'` (store dropped and recreated)
 - v2 → v3: `wasm_state` store added
+- v3 → v4: `sent_messages` store added
 
 ---
 
@@ -126,21 +128,26 @@ See `supabase/apply_schema.sql` for the authoritative schema.
 2. Client calls `group_create` Edge Function with the app UUID, `user_id`, `device_id`.
 3. Client calls `export_state()` and saves to IndexedDB.
 
-### Inviting a Member
+### Inviting a Member (link-based flow)
 
-1. Inviting client: `mlsClient.generateKeyPackage()` → temporary KeyPackage.
-2. `mlsClient.addMember(group, keyPackage)` → Commit + Welcome; epoch advances.
-3. Share JSON `{ groupId: appUuid, welcome: welcomeHex }` out-of-band.
-4. Inviting client calls `export_state()` and saves to IndexedDB.
+The invite flow is server-mediated — no manual hex copy-paste. E2E encryption is preserved: the server stores only public KP bytes and the encrypted Welcome.
+
+1. **Inviter** calls `invite_create` Edge Function → receives `invite_id`.
+2. Inviter constructs shareable URL: `https://app/?join=<invite_id>` and shares it (chat, email, etc.).
+3. **Joiner** opens the URL, logs in, and sees `InviteJoinView`.
+4. Joiner calls `mlsClient.generateKeyPackage()` → submits `kp_hex` via `invite_join` Edge Function.
+5. **Inviter's app** polls `invite_pending` every 5 s (via `InviteLink` component or `processPendingInvites` on login).
+6. When KP is found: `mlsClient.addMember(group, kp)` → Commit + Welcome; epoch advances.
+7. Inviter calls `invite_complete` with `welcome_hex`; calls `export_state()` and saves to IndexedDB.
+8. **Joiner** polls `invite_poll` every 3 s; when `welcome_hex` arrives → `processWelcome` → join complete.
 
 ### Joining via Welcome
 
-1. Joiner parses the invite code → extracts `groupId` (app UUID) and `welcome` (hex).
-2. `mlsClient.generateKeyPackage()` to generate own KeyPackage.
-3. `mlsClient.processWelcome(welcomeHex, keyPackage)` → WASM processes Welcome, returns `{ groupId: mlsHex, ... }`.
-4. Client calls `group_join` Edge Function to register as member.
-5. `saveMlsGroup({ id: appUuid, groupId: mlsHex, ... })` → IndexedDB.
-6. `export_state()` + `saveWasmState()` → IndexedDB.
+1. Joiner receives `welcome_hex` from `invite_poll` response (contains `{ status: 'complete', welcome_hex, group_id }`).
+2. `mlsClient.processWelcome(welcomeHex)` → WASM processes Welcome, returns `{ groupId: mlsHex, ... }`.
+3. Client calls `group_join` Edge Function to register as member on the server.
+4. `saveMlsGroup({ id: appUuid, groupId: mlsHex, ... })` → IndexedDB.
+5. `export_state()` + `saveWasmState()` → IndexedDB.
 
 ### Sending a Message
 

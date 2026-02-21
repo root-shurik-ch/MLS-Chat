@@ -1,140 +1,220 @@
-// Component for generating group invitation (Welcome message)
-// New flow: JOINER generates KP → INVITER uses it here → shows Welcome for joiner
-import React, { useState } from 'react';
+// InviteLink — inviter side of the new link-based invite flow.
+// Creates an invite link server-side, shows it for sharing, then auto-processes
+// the joiner's KP via WASM (addMember) and delivers the Welcome when they click join.
+import React, { useState, useEffect, useRef } from 'react';
 import { MlsClient, MlsGroup, KeyPackage } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
-import { Button } from '../ui/Button';
+import { Check, Copy, Link } from 'lucide-react';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
+
+function authHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'apikey': ANON_KEY,
+    'Authorization': `Bearer ${localStorage.getItem('authToken') ?? ANON_KEY}`,
+  };
+}
 
 interface InviteLinkProps {
   groupId: string;
+  userId: string;
+  deviceId: string;
   mlsGroup: MlsGroup;
   mlsClient: MlsClient;
-  onInviteGenerated?: (welcomeMessage: string) => void;
 }
+
+type Status = 'creating' | 'waiting' | 'processing' | 'done' | 'error';
 
 export const InviteLink: React.FC<InviteLinkProps> = ({
   groupId,
+  userId,
+  deviceId,
   mlsGroup,
   mlsClient,
-  onInviteGenerated
 }) => {
-  const [loading, setLoading] = useState(false);
-  const [joinerKpHex, setJoinerKpHex] = useState('');
-  const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>('creating');
+  const [inviteId, setInviteId] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toast = useToastContext();
 
-  const handleGenerateWelcome = async () => {
-    // Strip all whitespace — copied text may contain line-breaks from the display
-    const kpHex = joinerKpHex.replace(/\s+/g, '');
-    if (!kpHex) {
-      toast.warning('Paste the invite request code from the joiner first.');
-      return;
-    }
-    if (!/^[0-9a-fA-F]+$/.test(kpHex)) {
-      toast.error('Invalid code — paste the hex code from the joiner\'s "Generate Invite Request" step.');
+  // Create invite on mount
+  useEffect(() => {
+    if (!SUPABASE_URL) {
+      setErrorMsg('Configuration error');
+      setStatus('error');
       return;
     }
 
-    try {
-      setLoading(true);
-
-      const keyPackage: KeyPackage = {
-        data: kpHex,
-        signature: '',
-        hpkePublicKey: '',
-        credential: '',
-        extensions: {},
-      };
-
-      const result = await mlsClient.addMember(mlsGroup, keyPackage);
-
-      if (!result.welcome) {
-        throw new Error('Welcome message not generated');
-      }
-
-      const payload = JSON.stringify({ groupId, welcome: result.welcome });
-      setWelcomeMessage(payload);
-      onInviteGenerated?.(payload);
-
-      // Persist WASM state (epoch advanced after add_member)
-      const userId = localStorage.getItem('userId');
-      const deviceId = localStorage.getItem('deviceId');
-      if (userId && deviceId) {
-        try {
-          const stateJson = await mlsClient.exportState();
-          await saveAndSyncWasmState(userId, deviceId, stateJson);
-        } catch (e) {
-          console.warn('Failed to save WASM state after generating welcome:', e);
+    fetch(`${SUPABASE_URL}/functions/v1/invite_create`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ group_id: groupId, user_id: userId, device_id: deviceId }),
+    })
+      .then(r => r.json())
+      .then((data: { invite_id?: string; error?: string }) => {
+        if (data.error || !data.invite_id) {
+          setErrorMsg(data.error ?? 'Failed to create invite');
+          setStatus('error');
+          return;
         }
-      }
+        const id = data.invite_id;
+        const url = `${window.location.origin}?join=${id}`;
+        setInviteId(id);
+        setInviteUrl(url);
+        setStatus('waiting');
+      })
+      .catch(() => {
+        setErrorMsg('Failed to create invite');
+        setStatus('error');
+      });
+  }, [groupId, userId, deviceId]);
 
-      toast.success('Welcome generated! Share the code with the joiner.');
-    } catch (error) {
-      console.error('Failed to generate welcome:', error);
-      toast.error('Failed to generate welcome. Check the invite request code and try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Poll for pending KP while waiting
+  useEffect(() => {
+    if (status !== 'waiting' || !inviteId || !SUPABASE_URL) return;
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/invite_pending`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ user_id: userId, device_id: deviceId }),
+        });
+        const data = await res.json() as {
+          invites?: Array<{ invite_id: string; group_id: string; kp_hex: string }>;
+        };
+
+        const match = (data.invites ?? []).find(inv => inv.invite_id === inviteId);
+        if (!match) return;
+
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        setStatus('processing');
+
+        // WASM: addMember with joiner's key package
+        const kp: KeyPackage = {
+          data: match.kp_hex,
+          signature: '',
+          hpkePublicKey: '',
+          credential: '',
+          extensions: {},
+        };
+        const result = await mlsClient.addMember(mlsGroup, kp);
+        if (!result.welcome) throw new Error('Welcome not generated by WASM');
+
+        // Deliver welcome to server
+        const completeRes = await fetch(`${SUPABASE_URL}/functions/v1/invite_complete`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            invite_id: inviteId,
+            user_id: userId,
+            device_id: deviceId,
+            welcome_hex: result.welcome,
+          }),
+        });
+        const completeData = await completeRes.json() as { ok?: boolean; error?: string };
+        if (!completeData.ok) throw new Error(completeData.error ?? 'Failed to complete invite');
+
+        // Persist updated WASM state (epoch advanced after addMember)
+        const stateJson = await mlsClient.exportState();
+        await saveAndSyncWasmState(userId, deviceId, stateJson);
+
+        setStatus('done');
+        toast.success('Member added successfully!');
+      } catch (e) {
+        console.error('[InviteLink] processing error:', e);
+        setErrorMsg(e instanceof Error ? e.message : 'Failed to process invite');
+        setStatus('error');
+        if (pollingRef.current) clearInterval(pollingRef.current);
+      }
+    }, 5000);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [status, inviteId, userId, deviceId, mlsGroup, mlsClient]);
 
   const handleCopy = async () => {
-    if (!welcomeMessage) return;
-    await navigator.clipboard.writeText(welcomeMessage);
+    if (!inviteUrl) return;
+    await navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    toast.success('Welcome code copied!');
-  };
-
-  const handleReset = () => {
-    setWelcomeMessage(null);
-    setJoinerKpHex('');
-    setCopied(false);
   };
 
   return (
     <div className="space-y-4">
-      <div>
-        <p className="text-[13px] text-white/40 uppercase tracking-widest mb-3">Add Member</p>
-        <p className="text-sm text-white/60 mb-4">
-          Ask the person joining to generate an invite request, then paste their code below.
-        </p>
-      </div>
+      <p className="font-mono text-[10px] text-white/30 uppercase tracking-widest">Invite member</p>
 
-      {!welcomeMessage ? (
-        <div className="space-y-3">
-          <textarea
-            value={joinerKpHex}
-            onChange={(e) => setJoinerKpHex(e.target.value)}
-            placeholder="Paste joiner's invite request code here..."
-            className="w-full min-h-[100px] bg-transparent border border-white/10 focus:border-white/40 px-3 py-2 outline-none transition-all font-mono text-[12px] text-white/70 placeholder:text-white/20 resize-none"
-          />
-          <Button
-            variant="primary"
-            onClick={handleGenerateWelcome}
-            disabled={loading || !joinerKpHex.trim()}
-            className="disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Generating...' : 'Generate Welcome'}
-          </Button>
+      {/* Creating */}
+      {status === 'creating' && (
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
+          <span className="font-mono text-[11px] text-white/25">Generating link…</span>
         </div>
-      ) : (
+      )}
+
+      {/* Error */}
+      {status === 'error' && (
+        <p className="text-[12px] text-red-400/60">{errorMsg ?? 'Something went wrong.'}</p>
+      )}
+
+      {/* Done */}
+      {status === 'done' && (
+        <div className="flex items-center gap-2 text-white/50">
+          <Check size={13} />
+          <span className="text-[13px]">Member joined successfully.</span>
+        </div>
+      )}
+
+      {/* Waiting / Processing — show link */}
+      {(status === 'waiting' || status === 'processing') && inviteUrl && (
         <div className="space-y-3">
-          <div className="border border-white/10 p-3 font-mono text-[11px] text-white/50 max-h-[120px] overflow-y-auto break-all">
-            {welcomeMessage}
-          </div>
-          <div className="flex gap-3">
-            <Button variant="primary" onClick={handleCopy}>
-              {copied ? 'Copied!' : 'Copy Welcome Code'}
-            </Button>
-            <Button variant="ghost" onClick={handleReset}>
-              Add Another
-            </Button>
-          </div>
-          <p className="text-[11px] text-white/30">
-            Share this code with the joiner. They paste it to complete joining.
+          <p className="text-[12px] text-white/45">
+            Send this link to the person you want to invite:
           </p>
+
+          {/* Link row */}
+          <div className="flex items-center gap-0 border border-white/10">
+            <div className="flex items-center gap-2 flex-1 px-3 py-2.5 min-w-0">
+              <Link size={11} className="text-white/20 shrink-0" />
+              <span className="font-mono text-[11px] text-white/45 truncate">{inviteUrl}</span>
+            </div>
+            <button
+              onClick={handleCopy}
+              className="px-3 py-2.5 border-l border-white/10 text-white/35 hover:text-white hover:bg-white/5 active:bg-white/10 transition-colors shrink-0"
+              title="Copy link"
+            >
+              {copied
+                ? <Check size={13} className="text-white/60" />
+                : <Copy size={13} />
+              }
+            </button>
+          </div>
+
+          {/* Status row */}
+          <div className="flex items-center gap-2">
+            {status === 'waiting' ? (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/25 animate-pulse" />
+                <span className="font-mono text-[10px] text-white/25 uppercase tracking-widest">
+                  Waiting for them to join…
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" />
+                <span className="font-mono text-[10px] text-white/35 uppercase tracking-widest">
+                  Processing…
+                </span>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
