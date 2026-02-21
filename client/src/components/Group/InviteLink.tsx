@@ -32,6 +32,10 @@ export const InviteLink: React.FC<InviteLinkProps> = ({
       toast.warning('Paste the invite request code from the joiner first.');
       return;
     }
+    if (!/^[0-9a-fA-F]+$/.test(kpHex)) {
+      toast.error('Invalid code — paste the hex code from the joiner\'s "Generate Invite Request" step.');
+      return;
+    }
 
     try {
       setLoading(true);

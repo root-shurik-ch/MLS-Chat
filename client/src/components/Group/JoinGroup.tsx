@@ -74,6 +74,10 @@ export const JoinGroup: React.FC<JoinGroupProps> = ({ mlsClient, onJoinSuccess }
     const { groupId: serverGroupId, welcome: welcomeRaw } = parsed;
     // Strip any whitespace that may have crept in during copy-paste
     const welcome = welcomeRaw.replace(/\s+/g, '');
+    if (!/^[0-9a-fA-F]+$/.test(welcome)) {
+      toast.error('Invalid welcome code — the welcome field must be a hex string.');
+      return;
+    }
     const userId = localStorage.getItem('userId');
     const deviceId = localStorage.getItem('deviceId');
     if (!userId || !deviceId) {
