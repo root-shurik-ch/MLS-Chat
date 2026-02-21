@@ -94,7 +94,7 @@ serve(async (req: Request) => {
 
   const { error: memberError } = await supabase.from("group_members").insert({
     group_id: groupId,
-    device_id: deviceId,
+    user_id: userId,
     role: "member",
   });
 

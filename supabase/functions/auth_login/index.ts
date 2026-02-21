@@ -63,6 +63,7 @@ serve(async (req: Request) => {
     });
   }
 
+  // Select user data (mls_pk lives on the devices table, fetched separately below)
   const { data: user, error: userError } = await supabase
     .from("users")
     .select("user_id, passkey_credential_id, passkey_public_key, avatar_url, wasm_state_enc")
@@ -135,41 +136,42 @@ serve(async (req: Request) => {
     });
   }
 
-  // Get or create device (mls keys live in devices, not users)
-  let { data: device } = await supabase
+  // Ensure device record exists. Fetch existing device to get mls_pk.
+  // No mls_sk_enc is stored or returned — private key is derived client-side from PRF via HKDF.
+  let deviceMlsPk: string | null = null;
+  const { data: existingDevice } = await supabase
     .from("devices")
-    .select("*")
+    .select("device_id, mls_pk")
     .eq("device_id", device_id)
-    .single();
+    .maybeSingle();
 
-  if (!device) {
+  if (!existingDevice) {
+    // New device for existing user — copy mls_pk from any existing device
     const { data: anyDevice } = await supabase
       .from("devices")
-      .select("mls_pk, mls_sk_enc")
+      .select("mls_pk")
       .eq("user_id", user_id)
       .limit(1)
-      .single();
-    if (!anyDevice) {
-      return new Response(JSON.stringify({ error: "No device keys for user" }), {
-        status: 400,
-        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
-      });
-    }
+      .maybeSingle();
+
+    deviceMlsPk = anyDevice?.mls_pk ?? null;
+
     const { error: insertError } = await supabase
       .from("devices")
       .insert({
         device_id,
         user_id,
-        mls_pk: anyDevice.mls_pk,
-        mls_sk_enc: anyDevice.mls_sk_enc,
+        mls_pk: deviceMlsPk,
       });
     if (insertError) {
+      console.error("[auth_login] devices insert error:", insertError.message);
       return new Response(JSON.stringify({ error: insertError.message }), {
         status: 400,
         headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
-    device = { mls_pk: anyDevice.mls_pk, mls_sk_enc: anyDevice.mls_sk_enc };
+  } else {
+    deviceMlsPk = existingDevice.mls_pk ?? null;
   }
 
   // Delete used challenge
@@ -177,12 +179,14 @@ serve(async (req: Request) => {
 
   const auth_token = "dummy_token";
 
+  // Return mls_public_key so the client can use it for KeyPackage operations.
+  // mls_private_key_enc is NOT returned — the client derives the private key
+  // deterministically from the passkey PRF output via HKDF, without any server round-trip.
   return new Response(
     JSON.stringify({
       user_id,
       auth_token,
-      mls_private_key_enc: device.mls_sk_enc,
-      mls_public_key: device.mls_pk,
+      mls_public_key: deviceMlsPk,
       wasm_state_enc: user.wasm_state_enc ?? null,
       profile: {
         userId: user_id,

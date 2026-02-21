@@ -14,7 +14,7 @@ serve(async (req: Request) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders(req) });
   }
 
-  let body: { group_id?: string; user_id?: string; device_id?: string };
+  let body: { user_id?: string; device_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -24,13 +24,12 @@ serve(async (req: Request) => {
     );
   }
 
-  const groupId = typeof body.group_id === "string" ? body.group_id.trim() : "";
   const userId = typeof body.user_id === "string" ? body.user_id.trim() : "";
   const deviceId = typeof body.device_id === "string" ? body.device_id.trim() : "";
 
-  if (!groupId || !userId || !deviceId) {
+  if (!userId || !deviceId) {
     return new Response(
-      JSON.stringify({ error: "group_id, user_id, and device_id are required" }),
+      JSON.stringify({ error: "user_id and device_id are required" }),
       { status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
@@ -44,47 +43,35 @@ serve(async (req: Request) => {
 
   if (deviceError || !deviceData || deviceData.user_id !== userId) {
     return new Response(
-      JSON.stringify({ error: "Invalid device or user" }),
+      JSON.stringify({ error: "Device not found or does not belong to user" }),
       { status: 403, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
-  // Check user-level membership via is_group_member() helper
-  const { data: isMember } = await supabase
-    .rpc("is_group_member", { p_group_id: groupId, p_user_id: userId });
-
-  if (!isMember) {
-    return new Response(
-      JSON.stringify({ error: "Not a group member" }),
-      { status: 403, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
-    );
-  }
-
+  // Fetch all groups for this user via user-level group_members table
   const { data: rows, error } = await supabase
-    .from("messages")
-    .select("server_seq, server_time, sender_id, device_id, msg_kind, mls_bytes")
-    .eq("group_id", groupId)
-    .order("server_seq", { ascending: true });
+    .from("groups")
+    .select("group_id, name, avatar_url, ds_url, group_members!inner(user_id)")
+    .eq("group_members.user_id", userId)
+    .order("group_id", { ascending: true });
 
   if (error) {
-    console.error("[get_messages] select error:", error);
+    console.error("[user_groups] select error:", error);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
-  const messages = (rows ?? []).map((r) => ({
-    server_seq: r.server_seq,
-    server_time: typeof r.server_time === "number" ? r.server_time : Number(r.server_time),
-    sender_id: r.sender_id,
-    device_id: r.device_id,
-    msg_kind: r.msg_kind,
-    mls_bytes: r.mls_bytes,
+  const groups = (rows ?? []).map((g) => ({
+    group_id: g.group_id,
+    name: g.name,
+    avatar_url: g.avatar_url ?? null,
+    ds_url: g.ds_url,
   }));
 
   return new Response(
-    JSON.stringify({ messages }),
+    JSON.stringify({ groups }),
     { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
   );
 });

@@ -43,7 +43,6 @@ serve(async (req: Request) => {
     user_id: name_input,
     device_id,
     mls_public_key,
-    mls_private_key_enc,
     webauthn_create_response,
   } = body;
 
@@ -195,6 +194,9 @@ serve(async (req: Request) => {
   const credIdStr = cred.id;
   const credPk = cred.publicKey;
 
+  // mls_private_key_enc is NOT stored on the server — the private key is
+  // derived deterministically client-side from the passkey PRF via HKDF.
+  // mls_public_key is stored on the devices table (fetched during login for KeyPackage invites).
   const { data: user, error: userError } = await supabase
     .from("users")
     .upsert({
@@ -214,14 +216,13 @@ serve(async (req: Request) => {
     });
   }
 
-  // Insert device
+  // Insert device record (no mls_sk_enc — removed by migration)
   const { error: deviceError } = await supabase
     .from("devices")
     .insert({
       device_id,
       user_id,
-      mls_pk: mls_public_key,
-      mls_sk_enc: mls_private_key_enc,
+      mls_pk: mls_public_key ?? null,
     });
 
   if (deviceError) {

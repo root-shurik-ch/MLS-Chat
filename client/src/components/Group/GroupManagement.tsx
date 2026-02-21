@@ -4,7 +4,8 @@ import JoinGroup from './JoinGroup';
 import CreateGroupForm from './CreateGroupForm';
 import { MlsClient } from '../../mls/index';
 import { IndexedDBStorage } from '../../utils/storage';
-import { Plus, LogIn } from 'lucide-react';
+import { deleteMlsGroup, loadAllMlsGroups } from '../../utils/mlsGroupStorage';
+import { Plus, LogIn, Trash2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface GroupManagementProps {
@@ -29,9 +30,38 @@ async function loadGroupMetasFromIndexedDB(): Promise<GroupMeta[]> {
   return metas;
 }
 
+async function fetchServerGroups(userId: string, deviceId: string): Promise<GroupMeta[]> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
+  const authToken = localStorage.getItem('authToken') ?? anonKey;
+  if (!supabaseUrl || !userId || !deviceId) return [];
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/user_groups`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ user_id: userId, device_id: deviceId }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { groups?: Array<{ group_id: string; name: string; avatar_url?: string | null; ds_url: string }> };
+    return (data.groups ?? []).map((g) => ({
+      groupId: g.group_id,
+      name: g.name,
+      avatarUrl: g.avatar_url ?? undefined,
+      dsUrl: g.ds_url,
+      currentEpoch: 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 const GroupManagement: React.FC<GroupManagementProps> = ({
-  userId: _userId,
-  deviceId: _deviceId,
+  userId,
+  deviceId,
   mlsClient,
   onSelectGroup,
   onGroupCreated,
@@ -39,41 +69,41 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [groups, setGroups] = useState<GroupMeta[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
+    // Fetch from server (source of truth for group membership)
+    const serverGroups = await fetchServerGroups(userId, deviceId);
+
+    // Also load from IndexedDB as offline fallback
     const fromIndexedDB = await loadGroupMetasFromIndexedDB();
-    const fromLocal = JSON.parse(localStorage.getItem('groups') || '[]') as GroupMeta[];
+
+    // Server takes priority; merge with IndexedDB for offline fallback
     const byId = new Map<string, GroupMeta>();
-    for (const g of fromLocal) {
+    for (const g of fromIndexedDB) {
       if (g?.groupId && g?.name) byId.set(g.groupId, g);
     }
-    for (const g of fromIndexedDB) {
+    for (const g of serverGroups) {
       byId.set(g.groupId, g);
     }
+
+    // Persist server groups to IndexedDB for offline access
+    if (serverGroups.length > 0) {
+      const storage = new IndexedDBStorage('mls-groups', 'groups');
+      await storage.init();
+      for (const g of serverGroups) {
+        await storage.set(g.groupId, g);
+      }
+    }
+
     setGroups(Array.from(byId.values()));
-  }, []);
+  }, [userId, deviceId]);
 
   useEffect(() => {
     loadGroups();
   }, [loadGroups]);
 
   const handleJoinSuccess = async (groupId: string) => {
-    const storedGroups = JSON.parse(localStorage.getItem('groups') || '[]') as GroupMeta[];
-    const groupExists = storedGroups.some((g: GroupMeta) => g.groupId === groupId);
-    if (!groupExists) {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const dsUrl = import.meta.env.VITE_WS_URL || (supabaseUrl
-        ? (() => { const u = new URL(supabaseUrl); return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send'; })()
-        : 'ws://localhost:54321/functions/v1/ds_send');
-      storedGroups.push({
-        groupId,
-        name: `Group ${groupId.substring(0, 8)}`,
-        dsUrl,
-        currentEpoch: 0,
-      });
-      localStorage.setItem('groups', JSON.stringify(storedGroups));
-    }
-
     setShowJoinForm(false);
     await loadGroups();
     onSelectGroup(groupId);
@@ -85,23 +115,77 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     onGroupCreated?.();
   };
 
+  const handleDeleteGroup = async (groupId: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+    const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
+    const authToken = localStorage.getItem('authToken') ?? anonKey;
+    if (!supabaseUrl) return;
+
+    setDeletingGroupId(groupId);
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/group_delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ group_id: groupId, user_id: userId, device_id: deviceId }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        console.error('[GroupManagement] Delete group failed:', data.error ?? res.status);
+        return;
+      }
+
+      // Remove from local IndexedDB storage
+      const storage = new IndexedDBStorage('mls-groups', 'groups');
+      await storage.init();
+      await storage.delete(groupId);
+
+      // Remove WASM group state
+      const allMlsGroups = await loadAllMlsGroups();
+      const mlsGroup = allMlsGroups.find(g => g.groupId === groupId);
+      if (mlsGroup) {
+        await deleteMlsGroup(mlsGroup.id).catch(() => {});
+      }
+
+      await loadGroups();
+    } finally {
+      setDeletingGroupId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Group list */}
       <div className="flex-1 overflow-y-auto">
         {groups.length === 0 ? (
-          <div className="px-4 py-8 text-center">
-            <p className="text-[13px] text-white/20">No groups yet</p>
+          <div className="px-5 py-10 text-center">
+            <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">No groups</p>
           </div>
         ) : (
           groups.map(group => (
             <div
               key={group.groupId}
-              className="flex items-center justify-between px-4 py-4 hover:bg-white/5 cursor-pointer transition-all border-b border-white/5"
+              className="group flex items-center justify-between px-5 py-3.5 hover:bg-white/5 cursor-pointer transition-colors border-b border-white/5"
               onClick={() => onSelectGroup(group.groupId)}
             >
-              <span className="text-sm font-medium">{group.name}</span>
-              <span className="font-mono text-[10px] text-white/20">{group.groupId.substring(0, 6)}</span>
+              <span className="text-[14px] font-medium text-white/80 group-hover:text-white transition-colors truncate">
+                {group.name}
+              </span>
+              <div className="flex items-center gap-2 shrink-0 ml-2">
+                <span className="font-mono text-[10px] text-white/20">{group.groupId.substring(0, 6)}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.groupId); }}
+                  disabled={deletingGroupId === group.groupId}
+                  className="p-1 text-white/20 hover:text-white/50 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-20"
+                  title="Delete group"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
             </div>
           ))
         )}
@@ -109,48 +193,48 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
 
       {/* Create/Join forms */}
       {showCreateForm && (
-        <div className="border-t border-white/10 p-4">
+        <div className="border-t border-white/10 p-4 animate-fade-in">
           <CreateGroupForm mlsClient={mlsClient} onSuccess={handleGroupCreated} />
           <button
             onClick={() => setShowCreateForm(false)}
-            className="mt-3 text-[12px] text-white/30 hover:text-white/60 transition-colors"
+            className="mt-3 font-mono text-[11px] text-white/25 hover:text-white/50 transition-colors uppercase tracking-widest"
           >
-            Cancel
+            cancel
           </button>
         </div>
       )}
 
       {showJoinForm && mlsClient && (
-        <div className="border-t border-white/10 p-4">
+        <div className="border-t border-white/10 p-4 animate-fade-in">
           <JoinGroup mlsClient={mlsClient} onJoinSuccess={handleJoinSuccess} />
           <button
             onClick={() => setShowJoinForm(false)}
-            className="mt-3 text-[12px] text-white/30 hover:text-white/60 transition-colors"
+            className="mt-3 font-mono text-[11px] text-white/25 hover:text-white/50 transition-colors uppercase tracking-widest"
           >
-            Cancel
+            cancel
           </button>
         </div>
       )}
 
       {/* Action buttons */}
       {!showCreateForm && !showJoinForm && (
-        <div className="border-t border-white/10 p-4 flex gap-3">
+        <div className="border-t border-white/10 p-3 flex gap-2">
           <Button
             variant="ghost"
             onClick={() => setShowCreateForm(true)}
-            className="flex-1 flex items-center justify-center gap-2 py-2"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px]"
           >
-            <Plus size={14} />
-            <span className="text-[13px]">New</span>
+            <Plus size={12} />
+            New
           </Button>
           {mlsClient && (
             <Button
               variant="ghost"
               onClick={() => setShowJoinForm(true)}
-              className="flex-1 flex items-center justify-center gap-2 py-2"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px]"
             >
-              <LogIn size={14} />
-              <span className="text-[13px]">Join</span>
+              <LogIn size={12} />
+              Join
             </Button>
           )}
         </div>

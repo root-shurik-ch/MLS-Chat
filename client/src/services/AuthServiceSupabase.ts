@@ -47,7 +47,8 @@ export class AuthServiceSupabase implements AuthService {
     userId: string;
     deviceId: string;
     mlsPublicKey: string;
-    mlsPrivateKeyEnc: string;
+    /** @deprecated No longer sent — private key is derived client-side from PRF via HKDF */
+    mlsPrivateKeyEnc?: string;
     webauthnCreateResponse: Record<string, unknown>;
   }): Promise<{
     authToken: { value: string; expiresAt?: number };
@@ -61,7 +62,7 @@ export class AuthServiceSupabase implements AuthService {
         user_id: input.userId,
         device_id: input.deviceId,
         mls_public_key: input.mlsPublicKey,
-        mls_private_key_enc: input.mlsPrivateKeyEnc,
+        // mls_private_key_enc is intentionally omitted — private key stays on device
         webauthn_create_response: input.webauthnCreateResponse,
       }),
     });
@@ -96,8 +97,7 @@ export class AuthServiceSupabase implements AuthService {
   }): Promise<{
     authToken: { value: string; expiresAt?: number };
     profile: UserProfile;
-    mlsPublicKey: string;
-    mlsPrivateKeyEnc: string;
+    mlsPublicKey: string | null;
     wasmStateEnc: string | null;
   }> {
     const response = await fetch(`${this.baseUrl}/auth_login`, {
@@ -116,8 +116,7 @@ export class AuthServiceSupabase implements AuthService {
     const data = (await response.json()) as {
       auth_token?: string;
       profile?: UserProfile;
-      mls_public_key?: string;
-      mls_private_key_enc?: string;
+      mls_public_key?: string | null;
       wasm_state_enc?: string | null;
     };
     if (typeof data.auth_token !== 'string') {
@@ -126,17 +125,10 @@ export class AuthServiceSupabase implements AuthService {
     if (!data.profile || typeof data.profile !== 'object') {
       throw new Error('Invalid login response: missing profile');
     }
-    if (typeof data.mls_public_key !== 'string') {
-      throw new Error('Invalid login response: missing mls_public_key');
-    }
-    if (typeof data.mls_private_key_enc !== 'string') {
-      throw new Error('Invalid login response: missing mls_private_key_enc');
-    }
     return {
       authToken: { value: data.auth_token },
       profile: data.profile,
-      mlsPublicKey: data.mls_public_key,
-      mlsPrivateKeyEnc: data.mls_private_key_enc,
+      mlsPublicKey: data.mls_public_key ?? null,
       wasmStateEnc: data.wasm_state_enc ?? null,
     };
   }

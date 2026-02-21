@@ -8,9 +8,10 @@ import {
 } from '../../utils/webauthn';
 import {
   generateDeviceId,
-  generateMlsKeys,
-  encryptMlsPrivateKey,
+  deriveMLSPrivateKey,
   deriveKEnc,
+  deriveKWasmState,
+  sha256,
   encodeBase64Url,
 } from '../../utils/crypto';
 import { KeyManager } from '../../utils/keyManager';
@@ -82,9 +83,16 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
       );
 
       const prfOutput = authResult.prfOutput;
+
+      // Derive MLS private key deterministically from PRF output via HKDF.
+      // The same passkey always produces the same key — no need to store or
+      // encrypt the private key on the server.
+      const mlsPrivateKey = await deriveMLSPrivateKey(prfOutput);
+      const mlsPublicKey = await sha256(mlsPrivateKey); // Mock public key derivation
+
+      // Derive and store kEnc (for any future symmetric encryption) and kWasm.
       const kEnc = await deriveKEnc(prfOutput);
-      const { publicKey: mlsPublicKey, privateKey: mlsPrivateKey } = await generateMlsKeys();
-      const mlsPrivateKeyEnc = await encryptMlsPrivateKey(mlsPrivateKey, kEnc, userId);
+      const kWasm = await deriveKWasmState(prfOutput);
 
       const webauthnCreateResponse = serializeCreationResult({
         credentialId: createResult.credentialId,
@@ -92,16 +100,18 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         clientDataJSON: createResult.clientDataJSON,
       });
 
+      // Only send mls_public_key to the server — private key stays on device.
       const { authToken, profile } = await authService.register({
         challengeId,
         userId,
         deviceId,
         mlsPublicKey: encodeBase64Url(mlsPublicKey),
-        mlsPrivateKeyEnc,
         webauthnCreateResponse,
       });
 
+      // Store keys locally in IndexedDB — private key never leaves this device.
       await keyManager.storeKeys(userId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
+      await keyManager.storeKWasmState(userId, kWasm);
 
       localStorage.setItem('userId', userId);
       localStorage.setItem('deviceId', deviceId);

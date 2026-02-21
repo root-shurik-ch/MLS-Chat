@@ -174,61 +174,29 @@ Deno.serve(async (req: Request) => {
           return;
         }
 
-        // Verify user is in the group (group_members has device_id)
-        let memberData: { group_id: string } | null = null;
-        const { data: directMember, error: memberError } = await supabase
-          .from("group_members")
-          .select("group_id")
-          .eq("group_id", group_id)
-          .eq("device_id", dev_id)
-          .single();
+        // Verify user is a member of the group via user-level is_group_member() helper
+        const { data: isMember, error: memberError } = await supabase
+          .rpc("is_group_member", { p_group_id: group_id, p_user_id: userId });
 
-        if (!memberError && directMember) {
-          memberData = directMember;
-        } else {
-          // Same user may have re-logged in and got a new device_id; allow if user has any device in group
-          const { data: membersWithUser } = await supabase
-            .from("group_members")
-            .select("device_id")
-            .eq("group_id", group_id);
-          const deviceIdsInGroup = (membersWithUser ?? []).map((r: { device_id: string }) => r.device_id);
-          const { data: devicesOfUser } = await supabase
-            .from("devices")
-            .select("device_id")
-            .eq("user_id", userId);
-          const userDeviceIds = new Set((devicesOfUser ?? []).map((d: { device_id: string }) => d.device_id));
-          const userIsInGroup = deviceIdsInGroup.some((id: string) => userDeviceIds.has(id));
-          if (userIsInGroup) {
-            const { error: insertMemberErr } = await supabase.from("group_members").insert({
-              group_id,
-              device_id: dev_id,
-              role: "member",
-            });
-            if (!insertMemberErr || insertMemberErr.code === "23505") {
-              memberData = { group_id };
-            }
-          }
-          if (!memberData) {
-            console.error("[ds_send] Not a group member:", {
-              group_id,
-              device_id: dev_id,
-              memberError: memberError?.message,
-              deviceIdsInGroup,
-            });
-            socket.send(JSON.stringify({
-              type: "error",
-              context: "send",
-              client_seq,
-              error: "Not a group member"
-            }));
-            return;
-          }
+        if (memberError || !isMember) {
+          console.error("[ds_send] Not a group member:", {
+            group_id,
+            user_id: userId,
+            memberError: memberError?.message,
+          });
+          socket.send(JSON.stringify({
+            type: "error",
+            context: "send",
+            client_seq,
+            error: "Not a group member"
+          }));
+          return;
         }
 
-        // messages.sender_id and messages.device_id reference devices(device_id), not user_id
+        // sender_id stores the user_id (from authenticated session), device_id stores dev_id
         const { data: result, error } = await supabase.rpc('send_message', {
           p_group_id: group_id,
-          p_sender_id: dev_id,
+          p_sender_id: sender_id,
           p_device_id: dev_id,
           p_msg_kind: msg_kind,
           p_mls_bytes: mls_bytes,

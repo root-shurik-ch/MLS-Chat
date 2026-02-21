@@ -1,5 +1,14 @@
 // crypto utilities for MLS key encryption
 
+/**
+ * Helper: convert a Uint8Array to a plain ArrayBuffer so WebCrypto APIs
+ * accept it under strict @types/node typings (which distinguish ArrayBuffer
+ * from SharedArrayBuffer in Uint8Array<ArrayBufferLike>).
+ */
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+}
+
 export async function deriveKEnc(prfOutput: Uint8Array): Promise<CryptoKey> {
   const salt = new TextEncoder().encode("MLS-KDF-Salt");
   const info = new TextEncoder().encode("MLS-PrivateKey-Encryption");
@@ -8,7 +17,7 @@ export async function deriveKEnc(prfOutput: Uint8Array): Promise<CryptoKey> {
 
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
-    prfOutput,
+    toArrayBuffer(prfOutput),
     'HKDF',
     false,
     ['deriveKey']
@@ -18,8 +27,8 @@ export async function deriveKEnc(prfOutput: Uint8Array): Promise<CryptoKey> {
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: salt,
-      info: info,
+      salt: toArrayBuffer(salt),
+      info: toArrayBuffer(info),
     },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
@@ -39,10 +48,10 @@ export async function deriveKWasmState(prfOutput: Uint8Array): Promise<CryptoKey
   const info = new TextEncoder().encode("MLS-WasmState-Encryption");
 
   const keyMaterial = await crypto.subtle.importKey(
-    'raw', prfOutput, 'HKDF', false, ['deriveKey']
+    'raw', toArrayBuffer(prfOutput), 'HKDF', false, ['deriveKey']
   );
   return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt, info },
+    { name: 'HKDF', hash: 'SHA-256', salt: toArrayBuffer(salt), info: toArrayBuffer(info) },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -101,9 +110,9 @@ export async function encryptMlsPrivateKey(
   const aad = new TextEncoder().encode(userId);
 
   const cipher = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv, additionalData: aad },
+    { name: "AES-GCM", iv: toArrayBuffer(iv), additionalData: toArrayBuffer(aad) },
     kEnc,
-    mlsPrivateKeyBytes
+    toArrayBuffer(mlsPrivateKeyBytes)
   );
 
   const ciphertext = new Uint8Array(cipher);
@@ -161,7 +170,7 @@ export function decodeBase64Url(base64url: string): Uint8Array {
 }
 
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', toArrayBuffer(data)));
 }
 
 export function generateDeviceId(): string {
@@ -173,6 +182,42 @@ export async function generateMlsKeys(): Promise<{ publicKey: Uint8Array; privat
   const privateKey = crypto.getRandomValues(new Uint8Array(32));
   const publicKey = await sha256(privateKey); // Mock, real MLS has proper keypair
   return { publicKey, privateKey };
+}
+
+/**
+ * Derive the MLS identity private key deterministically from the passkey PRF output.
+ * Uses HKDF-SHA-256 with a dedicated info string so the same passkey always yields
+ * the same MLS key pair on every device — eliminating the need to store the private
+ * key on the server.
+ *
+ * Domain separation: info = "mls-identity-v1" (distinct from KEnc and KWasm).
+ * Do NOT change the info string — it would invalidate all existing identities.
+ */
+export async function deriveMLSPrivateKey(prfOutput: Uint8Array): Promise<Uint8Array> {
+  // Use ArrayBuffer explicitly to satisfy WebCrypto's strict BufferSource typing
+  // under updated @types/node which distinguishes ArrayBuffer from SharedArrayBuffer.
+  const toBuffer = (u8: Uint8Array): ArrayBuffer =>
+    u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+
+  const salt = toBuffer(new TextEncoder().encode("MLS-KDF-Salt"));
+  const info = toBuffer(new TextEncoder().encode("mls-identity-v1"));
+  const raw = toBuffer(prfOutput);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    raw,
+    "HKDF",
+    false,
+    ["deriveBits"],
+  );
+
+  const bits = await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt, info },
+    keyMaterial,
+    256, // 32 bytes
+  );
+
+  return new Uint8Array(bits);
 }
 
 export function deriveUserId(mlsPublicKey: Uint8Array): string {

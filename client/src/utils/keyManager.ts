@@ -104,6 +104,11 @@ export class KeyManager {
     await this.keyStorage.set(`kWasm_${userId}`, kWasm);
   }
 
+  /** Store the WASM-state encryption key derived from passkey PRF. */
+  async storeKWasmState(userId: string, kWasm: CryptoKey): Promise<void> {
+    await this.keyStorage.set(`kWasm_${userId}`, kWasm);
+  }
+
   /** Retrieve the WASM-state encryption key derived from passkey PRF. */
   async getKWasmState(userId: string): Promise<CryptoKey | null> {
     return (await this.keyStorage.get(`kWasm_${userId}`)) as CryptoKey | null;
@@ -113,7 +118,11 @@ export class KeyManager {
   private async derivePublicKey(privateKey: Uint8Array): Promise<Uint8Array> {
     // In real MLS, there's a proper keypair relationship
     // For now, mock with SHA-256 of private key
-    const hash = await crypto.subtle.digest('SHA-256', privateKey);
+    const keyBuffer = privateKey.buffer.slice(
+      privateKey.byteOffset,
+      privateKey.byteOffset + privateKey.byteLength,
+    ) as ArrayBuffer;
+    const hash = await crypto.subtle.digest('SHA-256', keyBuffer);
     return new Uint8Array(hash);
   }
 

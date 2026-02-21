@@ -9,10 +9,41 @@ import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
 import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteMlsGroup } from './utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from './utils/wasmStateSync';
+import { IndexedDBStorage } from './utils/storage';
 import { Lock, LogOut } from 'lucide-react';
 import { Button } from './components/ui/Button';
+import type { GroupMeta } from './domain/Group';
 
 type AppView = 'auth' | 'groups' | 'chat';
+
+async function fetchUserGroupsFromServer(userId: string, deviceId: string): Promise<GroupMeta[]> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
+  const authToken = localStorage.getItem('authToken') ?? anonKey;
+  if (!supabaseUrl || !userId || !deviceId) return [];
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/user_groups`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ user_id: userId, device_id: deviceId }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { groups?: Array<{ group_id: string; name: string; avatar_url?: string | null; ds_url: string }> };
+    return (data.groups ?? []).map((g) => ({
+      groupId: g.group_id,
+      name: g.name,
+      avatarUrl: g.avatar_url ?? undefined,
+      dsUrl: g.ds_url,
+      currentEpoch: 0,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('auth');
@@ -75,6 +106,22 @@ const App: React.FC = () => {
         }
       } catch (e) {
         console.warn('Failed to restore WASM state:', e);
+      }
+
+      // Fetch server group membership and persist to IndexedDB for offline access.
+      // This ensures the group list reflects the authoritative server state after login.
+      try {
+        const serverGroups = await fetchUserGroupsFromServer(userId, _deviceId);
+        if (serverGroups.length > 0) {
+          const groupStorage = new IndexedDBStorage('mls-groups', 'groups');
+          await groupStorage.init();
+          for (const g of serverGroups) {
+            await groupStorage.set(g.groupId, g);
+          }
+          console.log(`Synced ${serverGroups.length} group(s) from server`);
+        }
+      } catch (e) {
+        console.warn('Failed to sync groups from server:', e);
       }
 
       console.log('Services initialized successfully');

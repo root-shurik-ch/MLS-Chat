@@ -35,19 +35,7 @@ serve(async (req: Request) => {
     );
   }
 
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("user_id")
-    .eq("user_id", userId)
-    .single();
-
-  if (userError || !userData) {
-    return new Response(
-      JSON.stringify({ error: "User not found" }),
-      { status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
-    );
-  }
-
+  // Verify device belongs to user
   const { data: deviceData, error: deviceError } = await supabase
     .from("devices")
     .select("user_id")
@@ -57,45 +45,37 @@ serve(async (req: Request) => {
   if (deviceError || !deviceData || deviceData.user_id !== userId) {
     return new Response(
       JSON.stringify({ error: "Device not found or does not belong to user" }),
-      { status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+      { status: 403, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
-  const { data: groupData, error: groupError } = await supabase
+  // Verify user is a member of the group
+  const { data: isMember } = await supabase
+    .rpc("is_group_member", { p_group_id: groupId, p_user_id: userId });
+
+  if (!isMember) {
+    return new Response(
+      JSON.stringify({ error: "Not a group member" }),
+      { status: 403, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+    );
+  }
+
+  // Delete the group — CASCADE handles group_members, group_seq, and messages
+  const { error: deleteError } = await supabase
     .from("groups")
-    .select("group_id")
-    .eq("group_id", groupId)
-    .single();
+    .delete()
+    .eq("group_id", groupId);
 
-  if (groupError || !groupData) {
+  if (deleteError) {
+    console.error("[group_delete] delete error:", deleteError);
     return new Response(
-      JSON.stringify({ error: "Group not found" }),
-      { status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
-    );
-  }
-
-  const { error: insertError } = await supabase.from("group_members").insert({
-    group_id: groupId,
-    user_id: userId,
-    role: "member",
-  });
-
-  if (insertError) {
-    if (insertError.code === "23505") {
-      return new Response(
-        JSON.stringify({ group_id: groupId }),
-        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
-      );
-    }
-    console.error("[group_join] group_members insert error:", insertError);
-    return new Response(
-      JSON.stringify({ error: insertError.message }),
-      { status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+      JSON.stringify({ error: deleteError.message }),
+      { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
   return new Response(
-    JSON.stringify({ group_id: groupId }),
+    JSON.stringify({ success: true }),
     { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
   );
 });

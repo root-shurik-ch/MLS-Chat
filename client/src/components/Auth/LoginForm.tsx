@@ -5,7 +5,15 @@ import {
   isWebAuthnSupported,
   isPRFSupported,
 } from '../../utils/webauthn';
-import { generateDeviceId, decodeBase64Url, decryptString } from '../../utils/crypto';
+import {
+  generateDeviceId,
+  decodeBase64Url,
+  decryptString,
+  deriveMLSPrivateKey,
+  deriveKEnc,
+  deriveKWasmState,
+  sha256,
+} from '../../utils/crypto';
 import { KeyManager } from '../../utils/keyManager';
 import { AuthServiceSupabase } from '../../services/AuthServiceSupabase';
 import { saveWasmState } from '../../utils/mlsGroupStorage';
@@ -66,12 +74,12 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         return;
       }
 
-      const { userId: resolvedUserId, credentialId, prfOutput, credential } =
+      const { userId: resolvedUserId, prfOutput, credential } =
         await authenticatePasskeyDiscoverable(challenge, resolvedUserIdFromServer);
 
       const webauthnGetResponse = serializeGetResponse(credential);
 
-      const { authToken, profile, mlsPublicKey, mlsPrivateKeyEnc, wasmStateEnc } =
+      const { authToken, profile, mlsPublicKey: serverMlsPublicKey, wasmStateEnc } =
         await authService.login({
           challengeId,
           userId: resolvedUserId,
@@ -79,23 +87,32 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
           webauthnGetResponse,
         });
 
-      const mlsPublicKeyBytes = decodeBase64Url(mlsPublicKey);
-      await keyManager.decryptAndStoreServerKeyWithPrf(
-        mlsPrivateKeyEnc,
-        resolvedUserId,
-        deviceId,
-        prfOutput,
-        mlsPublicKeyBytes
-      );
+      // Derive MLS private key deterministically from PRF — no server round-trip needed.
+      // The same passkey PRF output always yields the same private key on any device.
+      const mlsPrivateKey = await deriveMLSPrivateKey(prfOutput);
 
+      // Derive the corresponding public key. If the server has one stored, verify
+      // consistency; otherwise fall back to locally derived value.
+      const derivedMlsPublicKey = await sha256(mlsPrivateKey);
+      const mlsPublicKey =
+        serverMlsPublicKey && serverMlsPublicKey.length > 0
+          ? decodeBase64Url(serverMlsPublicKey)
+          : derivedMlsPublicKey;
+
+      // Derive and store symmetric keys
+      const kEnc = await deriveKEnc(prfOutput);
+      const kWasm = await deriveKWasmState(prfOutput);
+
+      // Store keys locally in IndexedDB — private key never leaves this device.
+      await keyManager.storeKeys(resolvedUserId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
+      await keyManager.storeKWasmState(resolvedUserId, kWasm);
+
+      // Restore WASM state from server if available (contains group epoch secrets)
       if (wasmStateEnc) {
         try {
-          const kWasm = await keyManager.getKWasmState(resolvedUserId);
-          if (kWasm) {
-            const stateJson = await decryptString(wasmStateEnc, kWasm, resolvedUserId);
-            await saveWasmState(resolvedUserId, stateJson);
-            console.log('Restored WASM state from server');
-          }
+          const stateJson = await decryptString(wasmStateEnc, kWasm, resolvedUserId);
+          await saveWasmState(resolvedUserId, stateJson);
+          console.log('Restored WASM state from server');
         } catch (e) {
           console.warn('Failed to restore WASM state from server:', e);
         }

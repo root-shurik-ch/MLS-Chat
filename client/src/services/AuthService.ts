@@ -18,7 +18,8 @@ export interface AuthService {
     userId: string;
     deviceId: string;
     mlsPublicKey: string;
-    mlsPrivateKeyEnc: string;
+    /** @deprecated MLS private key is now derived client-side from PRF via HKDF — not sent to server */
+    mlsPrivateKeyEnc?: string;
     webauthnCreateResponse: Record<string, unknown>;
   }): Promise<{
     authToken: AuthToken;
@@ -33,10 +34,11 @@ export interface AuthService {
   }): Promise<{
     authToken: AuthToken;
     profile: UserProfile;
-    mlsPublicKey: string;
-    mlsPrivateKeyEnc: string;
+    /** MLS identity public key stored on the server (needed for KeyPackage invites) */
+    mlsPublicKey: string | null;
+    /** Encrypted WASM state blob for cross-device restore, or null if not yet uploaded */
+    wasmStateEnc: string | null;
   }>;
 
   getKeyPackage(userId: string, deviceId: string): Promise<string>;
 }
-
