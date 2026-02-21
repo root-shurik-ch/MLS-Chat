@@ -18,8 +18,6 @@ export interface AuthService {
     userId: string;
     deviceId: string;
     mlsPublicKey: string;
-    /** @deprecated MLS private key is now derived client-side from PRF via HKDF — not sent to server */
-    mlsPrivateKeyEnc?: string;
     webauthnCreateResponse: Record<string, unknown>;
   }): Promise<{
     authToken: AuthToken;

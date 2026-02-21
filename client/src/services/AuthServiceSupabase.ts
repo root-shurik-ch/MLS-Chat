@@ -47,8 +47,6 @@ export class AuthServiceSupabase implements AuthService {
     userId: string;
     deviceId: string;
     mlsPublicKey: string;
-    /** @deprecated No longer sent — private key is derived client-side from PRF via HKDF */
-    mlsPrivateKeyEnc?: string;
     webauthnCreateResponse: Record<string, unknown>;
   }): Promise<{
     authToken: { value: string; expiresAt?: number };
