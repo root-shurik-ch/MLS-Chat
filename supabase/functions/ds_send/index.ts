@@ -66,6 +66,9 @@ Deno.serve(async (req: Request) => {
           type: "pong",
           timestamp: data.timestamp
         }));
+        if (authenticated && userId) {
+          supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("user_id", userId);
+        }
         return;
       }
 
@@ -111,6 +114,8 @@ Deno.serve(async (req: Request) => {
         userId = user_id;
         deviceId = dev_id;
         authenticated = true;
+
+        await supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("user_id", user_id);
 
         for (const group_id of groups) {
           const channel = getGroupChannel(group_id);

@@ -34,3 +34,6 @@ entrypoint = "./functions/invite_poll/index.ts"
 
 [functions.invite_pending]
 entrypoint = "./functions/invite_pending/index.ts"
+
+[functions.group_members_list]
+entrypoint = "./functions/group_members_list/index.ts"

@@ -4,9 +4,10 @@ import { DeliveryServiceSupabase } from '../../services/DeliveryServiceSupabase'
 import { MlsClient, MlsGroup } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
 import InviteLink from '../Group/InviteLink';
+import GroupMembers from '../Group/GroupMembers';
 import { saveSentMessage, getSentMessage, getCachedMessage } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
-import { ArrowLeft, UserPlus, Lock } from 'lucide-react';
+import { ArrowLeft, UserPlus, Users, Lock } from 'lucide-react';
 
 interface ChatProps {
   userId: string;
@@ -43,6 +44,7 @@ const Chat: React.FC<ChatProps> = ({
   const [loading, setLoading] = useState(false);
   const [clientSeq, setClientSeq] = useState(1);
   const [showInvite, setShowInvite] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const toast = useToastContext();
@@ -300,7 +302,14 @@ const Chat: React.FC<ChatProps> = ({
         <div className="flex items-center gap-1">
           <Lock size={10} className="text-white/12 hidden sm:block" />
           <button
-            onClick={() => setShowInvite(!showInvite)}
+            onClick={() => { setShowMembers(v => !v); setShowInvite(false); }}
+            className={`p-2.5 transition-colors ${showMembers ? 'text-white' : 'text-white/30 hover:text-white'}`}
+            title="Members"
+          >
+            <Users size={14} />
+          </button>
+          <button
+            onClick={() => { setShowInvite(v => !v); setShowMembers(false); }}
             className={`p-2.5 -mr-1.5 transition-colors ${showInvite ? 'text-white' : 'text-white/30 hover:text-white'}`}
             title="Invite member"
           >
@@ -319,6 +328,13 @@ const Chat: React.FC<ChatProps> = ({
             mlsGroup={mlsGroup}
             mlsClient={mlsClient}
           />
+        </div>
+      )}
+
+      {/* Members panel */}
+      {showMembers && (
+        <div className="border-b border-white/10 bg-white/[0.02] animate-fade-in">
+          <GroupMembers groupId={groupId} userId={userId} deviceId={deviceId} />
         </div>
       )}
 
