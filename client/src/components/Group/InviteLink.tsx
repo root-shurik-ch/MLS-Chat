@@ -124,7 +124,11 @@ export const InviteLink: React.FC<InviteLinkProps> = ({
           headers: authHeaders(),
           body: JSON.stringify({ invite_id: inviteId, user_id: userId, device_id: deviceId }),
         });
-        const claimData = await claimRes.json() as { claimed?: boolean; error?: string };
+        if (!claimRes.ok) {
+          const errData = await claimRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(errData.error ?? `invite_claim failed (${claimRes.status})`);
+        }
+        const claimData = await claimRes.json() as { claimed?: boolean };
 
         if (!claimData.claimed) {
           // Background poll holds the claim — it will call addMember + invite_complete.
