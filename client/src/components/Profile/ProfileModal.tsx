@@ -112,6 +112,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({
       const data = await res.json() as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Save failed');
       onProfileUpdated({ statusText });
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save status');
     } finally {
