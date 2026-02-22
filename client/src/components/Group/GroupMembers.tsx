@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { senderColor } from '../../utils/senderColor';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
@@ -99,12 +100,28 @@ export const GroupMembers: React.FC<GroupMembersProps> = ({ groupId, userId, dev
 
       {members.map(m => (
         <div key={m.user_id} className="flex items-center gap-2.5 py-1">
-          <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 ${m.is_online ? 'bg-green-400/70' : 'bg-white/15'}`}
-            title={m.is_online ? 'Online' : 'Offline'}
-          />
+          <div className="relative shrink-0">
+            {m.avatar_url ? (
+              <img
+                src={m.avatar_url}
+                alt={m.user_id}
+                className="w-7 h-7 rounded-full object-cover border border-white/10"
+              />
+            ) : (
+              <div
+                className="w-7 h-7 rounded-full border border-white/10 flex items-center justify-center text-[11px] font-semibold select-none"
+                style={{ backgroundColor: senderColor(m.user_id) + '1a', color: senderColor(m.user_id) }}
+              >
+                {m.user_id.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <span
+              className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-black ${m.is_online ? 'bg-green-400/80' : 'bg-white/20'}`}
+              title={m.is_online ? 'Online' : 'Offline'}
+            />
+          </div>
           <span className="font-mono text-[12px] text-white/60 truncate">
-            {displayName(m)}
+            {m.user_id}
             {m.user_id === userId && (
               <span className="text-white/25 ml-1.5">you</span>
             )}

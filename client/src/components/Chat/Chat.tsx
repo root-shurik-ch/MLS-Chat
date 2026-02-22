@@ -8,6 +8,7 @@ import GroupMembers from '../Group/GroupMembers';
 import { saveSentMessage, getSentMessage, getCachedMessage } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
 import { ArrowLeft, UserPlus, Users, Lock } from 'lucide-react';
+import { senderColor } from '../../utils/senderColor';
 
 interface ChatProps {
   userId: string;
@@ -30,12 +31,6 @@ interface Message {
   isPending?: boolean;
 }
 
-/** Deterministic per-user hue — same color every session */
-function senderColor(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff;
-  return `hsl(${h % 360}, 55%, 68%)`;
-}
 
 const Chat: React.FC<ChatProps> = ({
   userId,
@@ -52,9 +47,35 @@ const Chat: React.FC<ChatProps> = ({
   const [clientSeq, setClientSeq] = useState(1);
   const [showInvite, setShowInvite] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  const [memberAvatars, setMemberAvatars] = useState<Map<string, string>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const toast = useToastContext();
+
+  // Fetch avatar URLs for group members
+  useEffect(() => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+    if (!supabaseUrl) return;
+    fetch(`${supabaseUrl}/functions/v1/group_members_list`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+        'Authorization': `Bearer ${localStorage.getItem('authToken') ?? anonKey}`,
+      },
+      body: JSON.stringify({ group_id: groupId, user_id: userId, device_id: deviceId }),
+    })
+      .then(r => r.json())
+      .then((data: { members?: Array<{ user_id: string; avatar_url: string | null }> }) => {
+        const map = new Map<string, string>();
+        for (const m of data.members ?? []) {
+          if (m.avatar_url) map.set(m.user_id, m.avatar_url);
+        }
+        setMemberAvatars(map);
+      })
+      .catch(() => {});
+  }, [groupId, userId, deviceId]);
 
   // Load message history when opening chat
   useEffect(() => {
@@ -391,11 +412,22 @@ const Chat: React.FC<ChatProps> = ({
               >
                 {/* Avatar circle — only for others' messages */}
                 {!msg.isSent && (
-                  <div
-                    className="w-[22px] h-[22px] rounded-full shrink-0 mr-2 mb-0.5 flex items-center justify-center text-[10px] font-semibold select-none"
-                    style={{ backgroundColor: color + '1a', color, border: `1px solid ${color}33` }}
+                  <div className="w-[22px] h-[22px] rounded-full shrink-0 mr-2 mb-0.5 overflow-hidden"
+                    style={!memberAvatars.has(msg.senderId) ? { backgroundColor: color + '1a', border: `1px solid ${color}33` } : {}}
                   >
-                    {msg.senderId.charAt(0).toUpperCase()}
+                    {memberAvatars.has(msg.senderId) ? (
+                      <img
+                        src={memberAvatars.get(msg.senderId)}
+                        alt={msg.senderId}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-[10px] font-semibold select-none"
+                        style={{ color }}
+                      >
+                        {msg.senderId.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                   </div>
                 )}
 
