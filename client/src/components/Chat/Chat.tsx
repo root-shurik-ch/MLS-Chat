@@ -31,6 +31,16 @@ interface Message {
   isPending?: boolean;
 }
 
+interface LinkPreview {
+  url: string;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  site_name: string | null;
+}
+
+const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
+
 
 const Chat: React.FC<ChatProps> = ({
   userId,
@@ -48,6 +58,7 @@ const Chat: React.FC<ChatProps> = ({
   const [showInvite, setShowInvite] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [memberAvatars, setMemberAvatars] = useState<Map<string, string>>(new Map());
+  const [linkPreviews, setLinkPreviews] = useState<Map<string, LinkPreview | null>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const toast = useToastContext();
@@ -76,6 +87,46 @@ const Chat: React.FC<ChatProps> = ({
       })
       .catch(() => {});
   }, [groupId, userId, deviceId]);
+
+  // Fetch link previews for URLs found in messages
+  useEffect(() => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+    if (!supabaseUrl) return;
+
+    const toFetch = new Set<string>();
+    for (const msg of messages) {
+      for (const url of msg.text.match(URL_REGEX) ?? []) {
+        if (!linkPreviews.has(url)) toFetch.add(url);
+      }
+    }
+    if (toFetch.size === 0) return;
+
+    // Mark as in-flight so we don't double-fetch
+    setLinkPreviews(prev => {
+      const next = new Map(prev);
+      for (const url of toFetch) next.set(url, null);
+      return next;
+    });
+
+    for (const url of toFetch) {
+      fetch(`${supabaseUrl}/functions/v1/link_preview`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${localStorage.getItem('authToken') ?? anonKey}`,
+        },
+        body: JSON.stringify({ url }),
+      })
+        .then(r => r.json())
+        .then((data: LinkPreview & { error?: string }) => {
+          if (data.error || !data.title) return;
+          setLinkPreviews(prev => new Map(prev).set(url, data));
+        })
+        .catch(() => {});
+    }
+  }, [messages]);
 
   // Load message history when opening chat
   useEffect(() => {
@@ -462,6 +513,48 @@ const Chat: React.FC<ChatProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Link preview card */}
+                  {(() => {
+                    const url = (msg.text.match(URL_REGEX) ?? [])[0];
+                    const preview = url ? linkPreviews.get(url) : undefined;
+                    if (!preview?.title) return null;
+                    return (
+                      <a
+                        href={preview.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block w-full rounded-xl overflow-hidden border border-white/10 hover:border-white/20 transition-colors no-underline"
+                        style={{ background: 'rgba(255,255,255,0.04)' }}
+                      >
+                        {preview.image && (
+                          <img
+                            src={preview.image}
+                            alt=""
+                            className="w-full h-28 object-cover"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        )}
+                        <div className="px-3 py-2 space-y-0.5">
+                          {preview.site_name && (
+                            <p className="font-mono text-[10px] text-white/30 uppercase tracking-widest truncate">
+                              {preview.site_name}
+                            </p>
+                          )}
+                          <p className="text-[13px] text-white/80 font-medium leading-snug"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {preview.title}
+                          </p>
+                          {preview.description && (
+                            <p className="text-[12px] text-white/40 leading-snug"
+                              style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {preview.description}
+                            </p>
+                          )}
+                        </div>
+                      </a>
+                    );
+                  })()}
                 </div>
 
                 {/* Spacer on the left for own messages (mirrors avatar width) */}
