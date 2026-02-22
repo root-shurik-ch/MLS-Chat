@@ -60,7 +60,11 @@ pub fn create_group(credential_identity: &[u8]) -> Result<String, JsValue> {
             signature_key: signer.public().into(),
         };
 
-        let group_config = MlsGroupCreateConfig::default();
+        let group_config = MlsGroupCreateConfig::builder()
+            // Embed the ratchet tree in the Welcome message so joiners can call
+            // process_welcome without needing the tree out-of-band (RFC 9420 §12.4.3.3).
+            .use_ratchet_tree_extension(true)
+            .build();
         let group = MlsGroup::new(
             &*backend,
             &signer,
