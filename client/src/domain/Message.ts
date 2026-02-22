@@ -1,4 +1,4 @@
-export type MsgKind = 'handshake' | 'chat' | 'control';
+export type MsgKind = 'handshake' | 'chat' | 'control' | 'commit';
 
 export interface OutgoingMessage {
   groupId: string;

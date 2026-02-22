@@ -1,9 +1,9 @@
 // InviteJoinView — shown full-screen after login when ?join=<invite_id> is in the URL.
 // Handles the joiner side of the new link-based invite flow.
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MlsClient } from '../../mls/index';
 import { useToastContext } from '../../contexts/ToastContext';
-import { saveMlsGroup } from '../../utils/mlsGroupStorage';
+import { saveMlsGroup, loadWasmState } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
 import { Button } from '../ui/Button';
 import { Lock } from 'lucide-react';
@@ -42,6 +42,69 @@ export const InviteJoinView: React.FC<InviteJoinViewProps> = ({
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toast = useToastContext();
 
+  // Start polling for welcome message. Must be called after KP has been submitted.
+  const startWelcomePolling = useCallback(() => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const pollRes = await fetch(`${SUPABASE_URL}/functions/v1/invite_poll`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ invite_id: inviteId, user_id: userId, device_id: deviceId }),
+        });
+        const pollData = await pollRes.json() as {
+          status?: string;
+          welcome_hex?: string;
+          group_id?: string;
+          error?: string;
+        };
+
+        if (pollData.status === 'complete' && pollData.welcome_hex && pollData.group_id) {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+
+          // processWelcome needs the KP private key in WASM memory.
+          // On iOS, tabs can be suspended and WASM memory cleared — reimport from
+          // IndexedDB on failure so the key survives suspension.
+          let mlsGroup;
+          try {
+            mlsGroup = await mlsClient.processWelcome(pollData.welcome_hex);
+          } catch {
+            const stateJson = await loadWasmState(userId);
+            if (!stateJson) throw new Error('WASM state unavailable — please refresh the page');
+            await mlsClient.importState(stateJson);
+            mlsGroup = await mlsClient.processWelcome(pollData.welcome_hex);
+          }
+
+          const serverGroupId = pollData.group_id;
+
+          const groupJoinRes = await fetch(`${SUPABASE_URL}/functions/v1/group_join`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ group_id: serverGroupId, user_id: userId, device_id: deviceId }),
+          });
+          if (!groupJoinRes.ok) {
+            const err = await groupJoinRes.json().catch(() => ({})) as { error?: string };
+            throw new Error(err.error ?? 'Failed to register as group member');
+          }
+
+          await saveMlsGroup({ ...mlsGroup, id: serverGroupId, groupId: mlsGroup.groupId });
+          const stateJson = await mlsClient.exportState();
+          await saveAndSyncWasmState(userId, deviceId, stateJson);
+
+          setStep('done');
+          toast.success('Joined group!');
+          onSuccess(serverGroupId);
+        }
+      } catch (e) {
+        console.error('[InviteJoinView] poll error:', e);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        setErrorMsg(e instanceof Error ? e.message : 'Failed to process invite. Please refresh.');
+        setStep('error');
+      }
+    }, 3000);
+  }, [inviteId, userId, deviceId, mlsClient, onSuccess, toast]);
+
   // Load invite info on mount
   useEffect(() => {
     if (!SUPABASE_URL) {
@@ -60,14 +123,25 @@ export const InviteJoinView: React.FC<InviteJoinViewProps> = ({
         if (data.error) { setErrorMsg(data.error); setStep('error'); return; }
         if (data.expired) { setErrorMsg('This invite link has expired.'); setStep('error'); return; }
         if (data.status === 'complete') { setErrorMsg('This invite has already been used.'); setStep('error'); return; }
+
         setGroupName(data.group_name ?? 'a group');
+
+        // kp_submitted: this user already submitted their KP (e.g. page was reloaded on mobile).
+        // Jump straight to waiting and resume polling — WASM state was persisted after KP generation
+        // so processWelcome will succeed when the admin delivers the welcome.
+        if (data.status === 'kp_submitted') {
+          setStep('waiting');
+          startWelcomePolling();
+          return;
+        }
+
         setStep('ready');
       })
       .catch(() => {
         setErrorMsg('Failed to load invite info. Check your connection.');
         setStep('error');
       });
-  }, [inviteId]);
+  }, [inviteId, startWelcomePolling]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -80,6 +154,11 @@ export const InviteJoinView: React.FC<InviteJoinViewProps> = ({
 
     try {
       const kp = await mlsClient.generateKeyPackage();
+
+      // Persist WASM state immediately — the KP private key must survive iOS tab suspension.
+      // If the tab is killed before processWelcome runs, we reimport this state on the next try.
+      const kpStateJson = await mlsClient.exportState();
+      await saveAndSyncWasmState(userId, deviceId, kpStateJson);
 
       const joinRes = await fetch(`${SUPABASE_URL}/functions/v1/invite_join`, {
         method: 'POST',
@@ -95,50 +174,7 @@ export const InviteJoinView: React.FC<InviteJoinViewProps> = ({
       if (!joinData.ok) throw new Error(joinData.error ?? 'Failed to submit join request');
 
       setStep('waiting');
-
-      // Poll for welcome every 3 seconds
-      pollingRef.current = setInterval(async () => {
-        try {
-          const pollRes = await fetch(`${SUPABASE_URL}/functions/v1/invite_poll`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ invite_id: inviteId, user_id: userId, device_id: deviceId }),
-          });
-          const pollData = await pollRes.json() as {
-            status?: string;
-            welcome_hex?: string;
-            group_id?: string;
-            error?: string;
-          };
-
-          if (pollData.status === 'complete' && pollData.welcome_hex && pollData.group_id) {
-            if (pollingRef.current) clearInterval(pollingRef.current);
-
-            const mlsGroup = await mlsClient.processWelcome(pollData.welcome_hex);
-            const serverGroupId = pollData.group_id;
-
-            const groupJoinRes = await fetch(`${SUPABASE_URL}/functions/v1/group_join`, {
-              method: 'POST',
-              headers: authHeaders(),
-              body: JSON.stringify({ group_id: serverGroupId, user_id: userId, device_id: deviceId }),
-            });
-            if (!groupJoinRes.ok) {
-              const err = await groupJoinRes.json().catch(() => ({})) as { error?: string };
-              throw new Error(err.error ?? 'Failed to register as group member');
-            }
-
-            await saveMlsGroup({ ...mlsGroup, id: serverGroupId, groupId: mlsGroup.groupId });
-            const stateJson = await mlsClient.exportState();
-            await saveAndSyncWasmState(userId, deviceId, stateJson);
-
-            setStep('done');
-            toast.success('Joined group!');
-            onSuccess(serverGroupId);
-          }
-        } catch (e) {
-          console.warn('[InviteJoinView] poll error:', e);
-        }
-      }, 3000);
+      startWelcomePolling();
     } catch (e) {
       console.error('[InviteJoinView] join error:', e);
       setErrorMsg(e instanceof Error ? e.message : 'Failed to join. Please try again.');

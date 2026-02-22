@@ -60,59 +60,25 @@ serve(async (req: Request) => {
     );
   }
 
-  // Step 1: get user_ids in this group
-  const { data: memberRows, error: memberRowsError } = await supabase
-    .from("group_members")
-    .select("user_id")
-    .eq("group_id", groupId);
+  // Single RPC call: JOIN + is_online computed in Postgres
+  // (bypasses PostgREST schema cache — avoids 500 on last_seen column)
+  const { data: memberRows, error: membersError } = await supabase
+    .rpc("get_group_members_with_presence", { p_group_id: groupId });
 
-  if (memberRowsError) {
-    console.error("[group_members_list] group_members query error:", memberRowsError);
+  if (membersError) {
+    console.error("[group_members_list] members query error:", membersError);
     return new Response(
       JSON.stringify({ error: "Failed to fetch group members" }),
       { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
-  const userIds = (memberRows ?? []).map((r: any) => r.user_id);
-
-  // Step 2: fetch user details for those ids
-  const { data: userRows, error: userRowsError } = userIds.length > 0
-    ? await supabase
-        .from("users")
-        .select("user_id, display_name, avatar_url, last_seen")
-        .in("user_id", userIds)
-    : { data: [], error: null };
-
-  if (userRowsError) {
-    console.error("[group_members_list] users query error:", userRowsError);
-    return new Response(
-      JSON.stringify({ error: "Failed to fetch user details" }),
-      { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
-    );
-  }
-
-  const userMap = new Map<string, any>();
-  for (const u of (userRows ?? [])) {
-    userMap.set(u.user_id, u);
-  }
-
-  const now = Date.now();
-  const onlineThresholdMs = 2 * 60 * 1000; // 2 minutes
-
-  const memberList = userIds.map((uid: string) => {
-    const user = userMap.get(uid);
-    const lastSeenRaw = user?.last_seen ?? null;
-    const lastSeenMs = lastSeenRaw ? new Date(lastSeenRaw).getTime() : null;
-    const isOnline = lastSeenMs !== null && (now - lastSeenMs) < onlineThresholdMs;
-    return {
-      user_id: uid,
-      display_name: user?.display_name ?? null,
-      avatar_url: user?.avatar_url ?? null,
-      is_online: isOnline,
-      last_seen: lastSeenRaw,
-    };
-  });
+  const memberList = (memberRows ?? []).map((row: any) => ({
+    user_id: row.user_id,
+    avatar_url: row.avatar_url ?? null,
+    is_online: row.is_online ?? false,
+    last_seen: row.last_seen ?? null,
+  }));
 
   // Fetch pending invites for this group
   const { data: pendingInvites, error: invitesError } = await supabase

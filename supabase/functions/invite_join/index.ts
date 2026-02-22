@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, handleCorsPreflight } from "../../_shared/cors.ts";
+import { sendPushToGroupMembers } from "../../_shared/push.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -50,10 +51,10 @@ serve(async (req: Request) => {
     );
   }
 
-  // Fetch invite
+  // Fetch invite — include group_id for push notification
   const { data: invite, error: inviteError } = await supabase
     .from("invites")
-    .select("status, expires_at")
+    .select("status, expires_at, group_id")
     .eq("invite_id", inviteId)
     .single();
 
@@ -91,6 +92,13 @@ serve(async (req: Request) => {
       { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
+
+  // Fire-and-forget push notification to group members so offline browsers wake up
+  sendPushToGroupMembers(supabase, invite.group_id, {
+    title: "Someone wants to join",
+    body: "Open the app to let them in.",
+    data: { type: "pending_invite", group_id: invite.group_id },
+  }).catch((e) => console.error("[invite_join] push error:", e));
 
   return new Response(
     JSON.stringify({ ok: true }),

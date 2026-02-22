@@ -14,7 +14,7 @@ serve(async (req: Request) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders(req) });
   }
 
-  let body: { user_id?: string; device_id?: string };
+  let body: { invite_id?: string; user_id?: string; device_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -24,12 +24,13 @@ serve(async (req: Request) => {
     );
   }
 
+  const inviteId = typeof body.invite_id === "string" ? body.invite_id.trim() : "";
   const userId = typeof body.user_id === "string" ? body.user_id.trim() : "";
   const deviceId = typeof body.device_id === "string" ? body.device_id.trim() : "";
 
-  if (!userId || !deviceId) {
+  if (!inviteId || !userId || !deviceId) {
     return new Response(
-      JSON.stringify({ error: "user_id and device_id are required" }),
+      JSON.stringify({ error: "invite_id, user_id, and device_id are required" }),
       { status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
@@ -48,21 +49,45 @@ serve(async (req: Request) => {
     );
   }
 
-  // Fetch pending invites for all groups where this user is a member
-  // (any member can process pending invites, not just the original inviter)
-  const { data: invites, error: invitesError } = await supabase
-    .rpc("get_pending_invites_for_member", { p_user_id: userId });
+  // Fetch invite to get group_id for membership check
+  const { data: invite, error: inviteError } = await supabase
+    .from("invites")
+    .select("group_id")
+    .eq("invite_id", inviteId)
+    .single();
 
-  if (invitesError) {
-    console.error("[invite_pending] query error:", invitesError);
+  if (inviteError || !invite) {
     return new Response(
-      JSON.stringify({ error: "Failed to fetch pending invites" }),
+      JSON.stringify({ error: "Invite not found" }),
+      { status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+    );
+  }
+
+  // Verify caller is a group member
+  const { data: isMember, error: memberError } = await supabase
+    .rpc("is_group_member", { p_group_id: invite.group_id, p_user_id: userId });
+
+  if (memberError || !isMember) {
+    return new Response(
+      JSON.stringify({ error: "Not a group member" }),
+      { status: 403, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+    );
+  }
+
+  // Atomic claim — returns true if this caller won the race
+  const { data: claimed, error: claimError } = await supabase
+    .rpc("claim_invite", { p_invite_id: inviteId, p_user_id: userId });
+
+  if (claimError) {
+    console.error("[invite_claim] claim error:", claimError);
+    return new Response(
+      JSON.stringify({ error: "Failed to claim invite" }),
       { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
   return new Response(
-    JSON.stringify({ invites: invites ?? [] }),
+    JSON.stringify({ claimed: claimed ?? false }),
     { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
   );
 });

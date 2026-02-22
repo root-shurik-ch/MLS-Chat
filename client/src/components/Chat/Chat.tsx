@@ -79,6 +79,14 @@ const Chat: React.FC<ChatProps> = ({
         if (!Array.isArray(list) || list.length === 0) return;
         const parsed: Message[] = [];
         for (const m of list) {
+          // Commits advance our MLS epoch but are never displayed as chat messages
+          if (m.msg_kind === 'commit') {
+            try {
+              await mlsClient.applyCommit(mlsGroup, { proposals: [], commit: m.mls_bytes, epochAuthenticator: '' });
+            } catch { /* already applied (e.g. joiner via Welcome) — no-op */ }
+            continue;
+          }
+
           const ts = typeof m.server_time === 'number'
             ? m.server_time
             : new Date(m.server_time as string).getTime();
@@ -173,6 +181,21 @@ const Chat: React.FC<ChatProps> = ({
         deliveryService.onDeliver(async (msg: IncomingMessage) => {
           if (!mounted) return;
           if (msg.senderId === userId && msg.deviceId === deviceId) return;
+
+          // Commit messages advance our MLS epoch — never display as chat
+          if (msg.msgKind === 'commit') {
+            try {
+              await mlsClient.applyCommit(mlsGroup, { proposals: [], commit: msg.mlsBytes, epochAuthenticator: '' });
+              const stateJson = await mlsClient.exportState();
+              saveAndSyncWasmState(userId, deviceId, stateJson).catch(e =>
+                console.warn('[Chat] Failed to save WASM state after applyCommit:', e)
+              );
+            } catch (e) {
+              // Joiner already at N+1 via Welcome — commit is redundant. Swallow silently.
+              console.warn('[Chat] applyCommit (likely already at new epoch):', e);
+            }
+            return;
+          }
 
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, msg.mlsBytes);
