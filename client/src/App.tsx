@@ -11,8 +11,8 @@ import { useToastContext } from './contexts/ToastContext';
 import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteMlsGroup } from './utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from './utils/wasmStateSync';
 import { IndexedDBStorage } from './utils/storage';
-import { registerPushNotifications } from './utils/pushNotifications';
-import { Lock, LogOut } from 'lucide-react';
+import { registerPushNotifications, requestAndRegisterPush } from './utils/pushNotifications';
+import { Lock, LogOut, Bell } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import type { GroupMeta } from './domain/Group';
 
@@ -486,13 +486,24 @@ const App: React.FC = () => {
           <Lock size={11} className="text-white/20" />
           <span className="font-mono text-[11px] text-white/30 tracking-widest uppercase">minimum.chat</span>
         </div>
-        <button
-          onClick={handleLogout}
-          className="p-2.5 -mr-1.5 text-white/25 hover:text-white/70 transition-colors"
-          title="Log out"
-        >
-          <LogOut size={14} />
-        </button>
+        <div className="flex items-center gap-0.5 -mr-1.5">
+          {'Notification' in window && Notification.permission === 'default' && (
+            <button
+              onClick={() => requestAndRegisterPush(userId!, deviceId!).catch(console.warn)}
+              className="p-2.5 text-white/25 hover:text-white/70 transition-colors"
+              title="Enable notifications"
+            >
+              <Bell size={13} />
+            </button>
+          )}
+          <button
+            onClick={handleLogout}
+            className="p-2.5 text-white/25 hover:text-white/70 transition-colors"
+            title="Log out"
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
       </div>
 
       {isConnecting && (

@@ -17,15 +17,26 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return buffer;
 }
 
+// Call from a user gesture (button click) to request permission and subscribe.
+export async function requestAndRegisterPush(userId: string, deviceId: string): Promise<void> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !VAPID_PUBLIC_KEY || !SUPABASE_URL) {
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return;
+  await registerPushNotifications(userId, deviceId);
+}
+
 export async function registerPushNotifications(userId: string, deviceId: string): Promise<void> {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !VAPID_PUBLIC_KEY || !SUPABASE_URL) {
     return;
   }
 
-  const registration = await navigator.serviceWorker.register('/sw.js');
+  // Never prompt automatically — browsers require a user gesture.
+  // Only subscribe if permission was already granted (e.g. previous session).
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return;
+  const registration = await navigator.serviceWorker.register('/sw.js');
 
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
