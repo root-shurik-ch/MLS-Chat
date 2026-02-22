@@ -60,30 +60,53 @@ serve(async (req: Request) => {
     );
   }
 
-  // Fetch group members joined with user info
-  const { data: members, error: membersError } = await supabase
+  // Step 1: get user_ids in this group
+  const { data: memberRows, error: memberRowsError } = await supabase
     .from("group_members")
-    .select("user_id, users!inner(display_name, avatar_url, last_seen)")
+    .select("user_id")
     .eq("group_id", groupId);
 
-  if (membersError) {
-    console.error("[group_members_list] members query error:", membersError);
+  if (memberRowsError) {
+    console.error("[group_members_list] group_members query error:", memberRowsError);
     return new Response(
       JSON.stringify({ error: "Failed to fetch group members" }),
       { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
+  const userIds = (memberRows ?? []).map((r: any) => r.user_id);
+
+  // Step 2: fetch user details for those ids
+  const { data: userRows, error: userRowsError } = userIds.length > 0
+    ? await supabase
+        .from("users")
+        .select("user_id, display_name, avatar_url, last_seen")
+        .in("user_id", userIds)
+    : { data: [], error: null };
+
+  if (userRowsError) {
+    console.error("[group_members_list] users query error:", userRowsError);
+    return new Response(
+      JSON.stringify({ error: "Failed to fetch user details" }),
+      { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+    );
+  }
+
+  const userMap = new Map<string, any>();
+  for (const u of (userRows ?? [])) {
+    userMap.set(u.user_id, u);
+  }
+
   const now = Date.now();
   const onlineThresholdMs = 2 * 60 * 1000; // 2 minutes
 
-  const memberList = (members ?? []).map((row: any) => {
-    const user = row.users;
+  const memberList = userIds.map((uid: string) => {
+    const user = userMap.get(uid);
     const lastSeenRaw = user?.last_seen ?? null;
     const lastSeenMs = lastSeenRaw ? new Date(lastSeenRaw).getTime() : null;
     const isOnline = lastSeenMs !== null && (now - lastSeenMs) < onlineThresholdMs;
     return {
-      user_id: row.user_id,
+      user_id: uid,
       display_name: user?.display_name ?? null,
       avatar_url: user?.avatar_url ?? null,
       is_online: isOnline,

@@ -31,6 +31,20 @@ DS → Client:
 }
 ```
 
+### Ping / Pong
+
+Client → DS:
+```json
+{ "type": "ping", "timestamp": 1234567890 }
+```
+
+DS → Client:
+```json
+{ "type": "pong", "timestamp": 1234567890 }
+```
+
+Send every 30 s. Also used to update `last_seen` for online presence.
+
 ### Send
 
 Client → DS:
@@ -116,3 +130,27 @@ Clients buffer messages with `server_seq` higher than expected. Once the missing
 
 - If a message is missing for too long, trigger offline recovery.
 - Ensure no gaps in `server_seq` for integrity.
+
+## Heartbeat / Presence
+
+Clients send a `ping` every **30 seconds** to keep the WebSocket alive and update online presence.
+
+```json
+{ "type": "ping", "timestamp": 1234567890 }
+```
+
+DS responds immediately with:
+
+```json
+{ "type": "pong", "timestamp": 1234567890 }
+```
+
+And fire-and-forgets a `last_seen` update for the authenticated user:
+
+```sql
+UPDATE users SET last_seen = NOW() WHERE user_id = $1;
+```
+
+The same update is also fired when the client successfully authenticates via `subscribe`.
+
+**Online threshold:** `last_seen > NOW() - INTERVAL '2 minutes'`. With a 30 s ping interval, this allows ~4 missed heartbeats before a user appears offline. See `group_members_list` for how this is exposed to clients.

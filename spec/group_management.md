@@ -6,6 +6,15 @@ This document describes the Edge Functions that manage groups and invite flows. 
 
 ## Database Schema
 
+### `users`
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | text PK | Derived from MLS public key: `base64url(SHA256(mls_public_key_bytes))` |
+| `display_name` | text | Human-readable name (set at registration) |
+| `avatar_url` | text | Optional profile picture |
+| `last_seen` | timestamptz | Updated on DS connect (`subscribe`) and every heartbeat (`ping`). Used for online presence. `NULL` = never connected. |
+
 ### `groups`
 
 | Column | Type | Notes |
@@ -300,3 +309,53 @@ Errors: `403` caller is not the joiner, `404` invite not found.
 ### Background processing on login (`App.tsx` `processPendingInvites`)
 
 On every login, `App.tsx` silently calls `invite_pending` once after `initializeServices`. Any invites with unprocessed KPs are handled automatically — the inviter does not need to have the invite panel open.
+
+---
+
+## Presence
+
+`last_seen` on the `users` table is updated in two places by the DS (`ds_send` Edge Function):
+
+1. **On `subscribe`** — immediately when a client authenticates its WebSocket connection.
+2. **On `ping`** — fire-and-forget update alongside each pong response (heartbeat every ~30 s).
+
+**Online threshold:** `last_seen > NOW() - INTERVAL '2 minutes'` (~4 missed heartbeats).
+
+---
+
+## POST /functions/v1/group_members_list
+
+Returns the member list and pending invites for a group.
+
+**Auth:** device ownership (device → user match in `devices`) + `is_group_member` RPC.
+
+Request:
+```json
+{ "group_id": "uuid", "user_id": "string", "device_id": "string" }
+```
+
+Response `200`:
+```json
+{
+  "members": [
+    {
+      "user_id": "string",
+      "display_name": "string | null",
+      "avatar_url": "string | null",
+      "is_online": true,
+      "last_seen": "2026-02-22T10:00:00Z | null"
+    }
+  ],
+  "pending": [
+    {
+      "invite_id": "uuid",
+      "status": "pending | kp_submitted",
+      "created_at": "2026-02-22T10:00:00Z"
+    }
+  ]
+}
+```
+
+`pending` contains only invites where `status IN ('pending', 'kp_submitted') AND expires_at > NOW()`.
+
+Errors: `403` device mismatch or not a group member, `500` query failure.

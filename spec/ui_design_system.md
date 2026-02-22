@@ -50,6 +50,15 @@
 ### 3. Group Management
 - **Members List:** Simple list with "Remove" button appearing on hover.
 - **Invite Links:** Copyable string containing group identifier.
+- **Members Panel:** Slide-in panel below the chat header (same placement as invite panel). Shows:
+  - Section label: `font-mono text-[10px] uppercase tracking-widest text-white/30` → `Members (N)`
+  - Per member row: `w-1.5 h-1.5 rounded-full` status dot (`bg-green-400/70` = online, `bg-white/15` = offline) + `font-mono text-[12px] text-white/60` display name. Current user gets a `text-white/25` "you" suffix.
+  - **Pending subsection** (only if count > 0): `border-t border-white/6` divider, then rows with a pulsing grey dot + `font-mono text-[11px] text-white/30` label: `"waiting for admin"` (status `kp_submitted`) or `"invited"` (status `pending`).
+  - Loading state: 3 skeleton rows with `animate-pulse` grey blocks.
+- **Chat Header Actions:** Two icon buttons in the header right zone:
+  - `<Users size={14} />` — toggles members panel (closes invite if open)
+  - `<UserPlus size={16} />` — toggles invite panel (closes members if open)
+  - Active state: `text-white`; inactive: `text-white/30 hover:text-white`
 - **State Changes:** Clearly notify when the MLS group "Epoch" changes.
 
 ### 4. Onboarding: "The Key Ceremony"
