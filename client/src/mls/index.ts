@@ -145,15 +145,19 @@ export class MlsClient {
   async processWelcome(welcomeMessage: string): Promise<MlsGroup> {
     await this.init()
 
-    const result = process_welcome(welcomeMessage)
-    const groupState = JSON.parse(result)
-    
-    return {
-      id: groupState.group_id,
-      epoch: groupState.epoch,
-      groupId: groupState.group_id,
-      treeHash: groupState.tree_hash,
-      epochAuthenticator: groupState.epoch_authenticator
+    try {
+      const result = process_welcome(welcomeMessage)
+      const groupState = JSON.parse(result)
+      return {
+        id: groupState.group_id,
+        epoch: groupState.epoch,
+        groupId: groupState.group_id,
+        treeHash: groupState.tree_hash,
+        epochAuthenticator: groupState.epoch_authenticator
+      }
+    } catch (error) {
+      console.error('processWelcome failed:', error)
+      throw new Error(`MLS processWelcome failed: ${error}`)
     }
   }
 

@@ -59,6 +59,10 @@ export const InviteJoinView: React.FC<InviteJoinViewProps> = ({
           group_id?: string;
           error?: string;
         };
+        if (!pollRes.ok) {
+          console.warn('[InviteJoinView] invite_poll error:', pollRes.status, pollData.error);
+          return; // keep polling — transient errors should not abort
+        }
 
         if (pollData.status === 'complete' && pollData.welcome_hex && pollData.group_id) {
           if (pollingRef.current) clearInterval(pollingRef.current);
@@ -97,9 +101,10 @@ export const InviteJoinView: React.FC<InviteJoinViewProps> = ({
           onSuccess(serverGroupId);
         }
       } catch (e) {
-        console.error('[InviteJoinView] poll error:', e);
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('[InviteJoinView] poll error:', msg, e);
         if (pollingRef.current) clearInterval(pollingRef.current);
-        setErrorMsg(e instanceof Error ? e.message : 'Failed to process invite. Please refresh.');
+        setErrorMsg(msg || 'Failed to process invite. Please refresh.');
         setStep('error');
       }
     }, 3000);
