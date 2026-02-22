@@ -13,7 +13,6 @@ function authHeaders() {
 
 interface Member {
   user_id: string;
-  display_name: string | null;
   avatar_url: string | null;
   is_online: boolean;
   last_seen: string | null;
@@ -67,8 +66,7 @@ export const GroupMembers: React.FC<GroupMembersProps> = ({ groupId, userId, dev
     return () => clearInterval(interval);
   }, [fetchMembers]);
 
-  const displayName = (m: Member) =>
-    m.display_name ?? m.user_id.substring(0, 12);
+  const displayName = (m: Member) => m.user_id.substring(0, 12);
 
   if (loading) {
     return (

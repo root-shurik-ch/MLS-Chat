@@ -73,7 +73,7 @@ This document describes the technologies and patterns used in MLS-Chat for contr
 
 Main tables used by auth and messaging:
 
-- **users** — `user_id` (PK, display name), `display_name`, `avatar_url`, `passkey_credential_id`, `passkey_public_key`.
+- **users** — `user_id` (PK), `avatar_url`, `passkey_credential_id`, `passkey_public_key`.
 - **devices** — `device_id` (PK), `user_id`, `mls_pk`, `mls_sk_enc` (encrypted MLS secret).
 - **challenges** — `challenge_id`, `challenge`, `action` (`register`/`login`), TTL.
 - **groups**, **group_members**, **group_seq**, **messages** — for MLS groups and message storage.

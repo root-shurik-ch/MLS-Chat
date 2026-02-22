@@ -37,7 +37,6 @@ Request body:
   "challenge_id": "uuid",
   "user_id": "string",
   "device_id": "string",
-  "display_name": "string",
   "mls_public_key": "base64",
   "mls_private_key_enc": "base64",
   "webauthn_create_response": {}
