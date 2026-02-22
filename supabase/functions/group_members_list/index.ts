@@ -75,6 +75,7 @@ serve(async (req: Request) => {
 
   const memberList = (memberRows ?? []).map((row: any) => ({
     user_id: row.user_id,
+    display_name: row.display_name ?? null,
     avatar_url: row.avatar_url ?? null,
     is_online: row.is_online ?? false,
     last_seen: row.last_seen ?? null,
