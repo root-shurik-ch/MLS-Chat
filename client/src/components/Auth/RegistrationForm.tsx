@@ -119,6 +119,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
         userId: profile.userId,
         displayName: profile.displayName,
         avatarUrl: profile.avatarUrl,
+        statusText: profile.statusText ?? null,
       }));
 
       onSuccess(userId, deviceId);

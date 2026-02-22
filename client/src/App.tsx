@@ -5,6 +5,7 @@ import GroupManagement from './components/Group/GroupManagement';
 import Chat from './components/Chat/Chat';
 import ConnectionStatus from './components/ConnectionStatus';
 import InviteJoinView from './components/Group/InviteJoinView';
+import ProfileModal from './components/Profile/ProfileModal';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
@@ -12,7 +13,7 @@ import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteMlsGroup } from '.
 import { saveAndSyncWasmState } from './utils/wasmStateSync';
 import { IndexedDBStorage } from './utils/storage';
 import { registerPushNotifications, requestAndRegisterPush } from './utils/pushNotifications';
-import { Lock, LogOut, Bell } from 'lucide-react';
+import { Lock, LogOut, Bell, UserCircle } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import type { GroupMeta } from './domain/Group';
 
@@ -57,6 +58,19 @@ const App: React.FC = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem('userProfile') ?? '{}');
+      return p.avatarUrl ?? null;
+    } catch { return null; }
+  });
+  const [profileStatusText, setProfileStatusText] = useState<string | null>(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem('userProfile') ?? '{}');
+      return p.statusText ?? null;
+    } catch { return null; }
+  });
 
   const mlsClientRef = useRef<MlsClient | null>(null);
   const deliveryServiceRef = useRef<DeliveryServiceSupabase | null>(null);
@@ -512,6 +526,13 @@ const App: React.FC = () => {
             </button>
           )}
           <button
+            onClick={() => setShowProfile(true)}
+            className="p-2.5 text-white/25 hover:text-white/70 transition-colors"
+            title="Profile"
+          >
+            <UserCircle size={14} />
+          </button>
+          <button
             onClick={handleLogout}
             className="p-2.5 text-white/25 hover:text-white/70 transition-colors"
             title="Log out"
@@ -538,6 +559,27 @@ const App: React.FC = () => {
     </aside>
   );
 
+  const handleProfileUpdated = (updates: { avatarUrl?: string; statusText?: string }) => {
+    if (updates.avatarUrl) setProfileAvatarUrl(updates.avatarUrl);
+    if (updates.statusText !== undefined) setProfileStatusText(updates.statusText);
+    // Persist to localStorage so it survives page reload
+    try {
+      const existing = JSON.parse(localStorage.getItem('userProfile') ?? '{}');
+      localStorage.setItem('userProfile', JSON.stringify({ ...existing, ...updates }));
+    } catch { /* ignore */ }
+  };
+
+  const ProfileModalOverlay = showProfile && userId && deviceId ? (
+    <ProfileModal
+      userId={userId}
+      deviceId={deviceId}
+      avatarUrl={profileAvatarUrl}
+      statusText={profileStatusText}
+      onClose={() => setShowProfile(false)}
+      onProfileUpdated={handleProfileUpdated}
+    />
+  ) : null;
+
   // Groups view
   // Mobile: full-screen list | Desktop: sidebar + placeholder
   if (view === 'groups') {
@@ -552,6 +594,7 @@ const App: React.FC = () => {
             <p className="font-mono text-[11px] text-white/18 uppercase tracking-widest">Select a group</p>
           </div>
         </main>
+        {ProfileModalOverlay}
       </div>
     );
   }
@@ -567,6 +610,7 @@ const App: React.FC = () => {
         <main className="flex-1 flex items-center justify-center">
           <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">Loading…</p>
         </main>
+        {ProfileModalOverlay}
       </div>
     );
   }
@@ -587,6 +631,7 @@ const App: React.FC = () => {
           onBack={handleBackToGroups}
         />
       </main>
+      {ProfileModalOverlay}
     </div>
   );
 };

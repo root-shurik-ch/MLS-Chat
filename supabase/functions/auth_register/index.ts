@@ -247,6 +247,7 @@ serve(async (req: Request) => {
         userId: user_id,
         displayName: user_id,
         avatarUrl: null,
+        statusText: null,
       },
     }),
     { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }

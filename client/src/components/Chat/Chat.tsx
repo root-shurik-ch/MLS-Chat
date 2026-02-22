@@ -30,6 +30,13 @@ interface Message {
   isPending?: boolean;
 }
 
+/** Deterministic per-user hue — same color every session */
+function senderColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff;
+  return `hsl(${h % 360}, 55%, 68%)`;
+}
+
 const Chat: React.FC<ChatProps> = ({
   userId,
   deviceId,
@@ -199,6 +206,9 @@ const Chat: React.FC<ChatProps> = ({
 
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, msg.mlsBytes);
+            // Persist to IndexedDB so messages survive re-entry (keys are ephemeral per epoch)
+            saveSentMessage(groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, msg.serverTime)
+              .catch(() => {});
             const newMessage: Message = {
               id: `msg_${msg.serverSeq}`,
               senderId: msg.senderId,
@@ -302,8 +312,6 @@ const Chat: React.FC<ChatProps> = ({
     return new Date(timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const getSenderLabel = (senderId: string) => senderId === userId ? 'you' : senderId.substring(0, 12);
-
   return (
     <div className="flex flex-col h-full bg-black text-white">
       {/* Header */}
@@ -362,7 +370,7 @@ const Chat: React.FC<ChatProps> = ({
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-4">
+      <div className="flex-1 overflow-y-auto py-3">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <Lock size={18} className="text-white/8" />
@@ -371,28 +379,64 @@ const Chat: React.FC<ChatProps> = ({
             </p>
           </div>
         ) : (
-          messages.map((msg, i) => (
-            <div
-              key={msg.id}
-              className={`flex flex-col mb-5 px-6 animate-fade-up ${msg.isPending ? 'opacity-40' : ''}`}
-              style={{ animationDelay: `${Math.min(i * 20, 200)}ms` }}
-            >
-              <div className="flex items-baseline gap-2.5 mb-1">
-                <span className="text-[13px] font-semibold tracking-tight">
-                  {getSenderLabel(msg.senderId)}
-                </span>
-                <span className="font-mono text-[10px] text-white/25 tabular-nums">
-                  {formatTime(msg.timestamp)}
-                </span>
-                {msg.isPending && (
-                  <span className="font-mono text-[10px] text-white/20">sending…</span>
+          messages.map((msg, i) => {
+            const prevMsg = i > 0 ? messages[i - 1] : null;
+            const isSameSender = prevMsg !== null && prevMsg.senderId === msg.senderId;
+            const color = senderColor(msg.senderId);
+
+            return (
+              <div
+                key={msg.id}
+                className={`flex items-end px-4 ${msg.isSent ? 'justify-end' : 'justify-start'} ${isSameSender ? 'mt-0.5' : 'mt-2'} ${msg.isPending ? 'opacity-50' : ''}`}
+              >
+                {/* Avatar circle — only for others' messages */}
+                {!msg.isSent && (
+                  <div
+                    className="w-[22px] h-[22px] rounded-full shrink-0 mr-2 mb-0.5 flex items-center justify-center text-[10px] font-semibold select-none"
+                    style={{ backgroundColor: color + '1a', color, border: `1px solid ${color}33` }}
+                  >
+                    {msg.senderId.charAt(0).toUpperCase()}
+                  </div>
                 )}
+
+                <div className={`flex flex-col max-w-[75%] ${msg.isSent ? 'items-end' : 'items-start'}`}>
+                  {/* Username label — only for others, only first in a consecutive run */}
+                  {!msg.isSent && !isSameSender && (
+                    <span
+                      className="text-[11px] font-medium mb-1 ml-1 truncate max-w-full"
+                      style={{ color }}
+                    >
+                      {msg.senderId}
+                    </span>
+                  )}
+
+                  {/* Bubble */}
+                  <div
+                    className={`px-3 py-2 ${
+                      msg.isSent
+                        ? 'bg-white/10 rounded-2xl rounded-br-sm'
+                        : 'bg-white/[0.07] rounded-2xl rounded-bl-sm'
+                    }`}
+                  >
+                    <span className="text-[15px] text-white/85 whitespace-pre-wrap leading-relaxed break-words block">
+                      {msg.text}
+                    </span>
+                    <div className="flex items-center justify-end gap-1 mt-0.5">
+                      <span className="font-mono text-[10px] text-white/30 tabular-nums">
+                        {formatTime(msg.timestamp)}
+                      </span>
+                      {msg.isPending && (
+                        <span className="font-mono text-[10px] text-white/20">…</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Spacer on the left for own messages (mirrors avatar width) */}
+                {msg.isSent && <div className="w-[22px] shrink-0 ml-2" />}
               </div>
-              <div className="text-[15px] text-white/85 whitespace-pre-wrap leading-relaxed">
-                {msg.text}
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>

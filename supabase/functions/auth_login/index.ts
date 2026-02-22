@@ -66,7 +66,7 @@ serve(async (req: Request) => {
   // Select user data (mls_pk lives on the devices table, fetched separately below)
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("user_id, passkey_credential_id, passkey_public_key, avatar_url, wasm_state_enc")
+    .select("user_id, passkey_credential_id, passkey_public_key, avatar_url, wasm_state_enc, status_text")
     .eq("user_id", user_id)
     .single();
 
@@ -192,6 +192,7 @@ serve(async (req: Request) => {
         userId: user_id,
         displayName: user.user_id,
         avatarUrl: user.avatar_url,
+        statusText: user.status_text ?? null,
       },
     }),
     { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }

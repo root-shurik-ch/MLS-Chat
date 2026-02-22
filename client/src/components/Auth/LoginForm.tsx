@@ -124,6 +124,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         userId: profile.userId,
         displayName: profile.displayName,
         avatarUrl: profile.avatarUrl,
+        statusText: profile.statusText ?? null,
       }));
 
       onSuccess(resolvedUserId, deviceId);
