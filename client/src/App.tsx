@@ -197,7 +197,22 @@ const App: React.FC = () => {
 
           // addMember via WASM
           const kp = { data: invite.kp_hex, signature: '', hpkePublicKey: '', credential: '', extensions: {} as Record<string, unknown> };
-          const result = await mlsClientRef.current.addMember(mlsGroup, kp);
+          let result;
+          try {
+            result = await mlsClientRef.current.addMember(mlsGroup, kp);
+          } catch (addErr) {
+            const msg = String(addErr);
+            if (msg.includes('DuplicateSignatureKey')) {
+              // User was already added to the MLS group (race with InviteLink 5s poll).
+              // The invite_complete likely already ran — just persist current WASM state and move on.
+              console.warn('[App] addMember skipped (already added):', invite.invite_id);
+              const stateJson = await mlsClientRef.current.exportState();
+              await saveAndSyncWasmState(uid, did, stateJson);
+            } else {
+              throw addErr; // re-throw unknown errors to outer catch
+            }
+            continue;
+          }
           if (!result.welcome) {
             console.warn('[App] addMember returned no welcome for invite:', invite.invite_id);
             continue;
