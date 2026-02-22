@@ -63,9 +63,9 @@ serve(async (req: Request) => {
       bytes[i] = binaryString.charCodeAt(i);
     }
 
-    // Limit to 500 KB
-    if (bytes.length > 512 * 1024) {
-      return new Response(JSON.stringify({ error: "Avatar must be at most 500 KB" }), {
+    // Limit to 200 KB (client targets 80 KB; 200 KB gives headroom for base64 overhead)
+    if (bytes.length > 200 * 1024) {
+      return new Response(JSON.stringify({ error: "Avatar must be at most 200 KB" }), {
         status: 400,
         headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });

@@ -22,25 +22,30 @@ function authHeaders() {
   };
 }
 
+// Converts any image to a 256×256 JPEG (center-cropped square).
+// Accepts any format the browser supports (PNG, WebP, GIF, HEIC, etc.).
+const AVATAR_SIZE = 256;
+
 async function compressToJpeg(file: File, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
+
+      // Center-crop to square, then scale to AVATAR_SIZE×AVATAR_SIZE
+      const size = Math.min(img.width, img.height);
+      const sx = (img.width - size) / 2;
+      const sy = (img.height - size) / 2;
+
       const canvas = document.createElement('canvas');
-      const maxDim = 512;
-      let w = img.width;
-      let h = img.height;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
-        else { w = Math.round(w * maxDim / h); h = maxDim; }
-      }
-      canvas.width = w;
-      canvas.height = h;
+      canvas.width = AVATAR_SIZE;
+      canvas.height = AVATAR_SIZE;
       const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0, w, h);
-      let quality = 0.85;
+      ctx.drawImage(img, sx, sy, size, size, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
+
+      // JPEG, start at quality 0.9, step down until within maxBytes
+      let quality = 0.9;
       let dataUrl = canvas.toDataURL('image/jpeg', quality);
       while (dataUrl.length * 0.75 > maxBytes && quality > 0.3) {
         quality -= 0.1;
@@ -74,7 +79,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({
     setError(null);
     setUploadingAvatar(true);
     try {
-      const base64 = await compressToJpeg(file, 500 * 1024);
+      const base64 = await compressToJpeg(file, 80 * 1024);
       const res = await fetch(`${SUPABASE_URL}/functions/v1/user_profile_update`, {
         method: 'POST',
         headers: authHeaders(),
