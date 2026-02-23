@@ -633,6 +633,7 @@ const Chat: React.FC<ChatProps> = ({
 
         deliveryService.onDeliver(async (msg: IncomingMessage) => {
           if (!mounted) return;
+          if (msg.groupId !== groupId) return;
           if (msg.senderId === userId && msg.deviceId === deviceId) return;
 
           if (msg.msgKind === 'commit') {

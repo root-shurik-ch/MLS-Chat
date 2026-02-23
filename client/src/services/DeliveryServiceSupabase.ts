@@ -75,7 +75,11 @@ export class DeliveryServiceSupabase implements DeliveryService {
   }
 
   async subscribe(input: { userId: string; deviceId: string; groups: string[] }): Promise<void> {
-    if (this.isSubscribing || this.subscribed) return;
+    const alreadySameGroups = this.subscribed &&
+      this.subscriptionData?.groups?.length === input.groups.length &&
+      input.groups.every(g => this.subscriptionData!.groups.includes(g));
+    if (this.isSubscribing || alreadySameGroups) return;
+    this.subscribed = false;
     if (!this.wsManager || !this.wsManager.isConnected()) {
       throw new Error("Not connected");
     }

@@ -646,6 +646,7 @@ const App: React.FC = () => {
       <Sidebar />
       <main className="flex-1 h-full overflow-hidden">
         <Chat
+          key={currentGroupId!}
           userId={userId!}
           deviceId={deviceId!}
           groupId={currentGroupId!}
