@@ -354,6 +354,13 @@ const Chat: React.FC<ChatProps> = ({
 
   // Re-fetch history when WebSocket reconnects so messages sent during outage appear.
   useEffect(() => {
+    // If the WebSocket is already connected when Chat mounts (App.tsx connected before
+    // this component rendered), mark it as seen so the first actual reconnect —
+    // not the already-past initial connect — triggers a history re-fetch.
+    if (deliveryService.getConnectionState() === ConnectionState.CONNECTED) {
+      hasConnectedRef.current = true;
+    }
+
     const unsubscribe = deliveryService.onStateChange((state: ConnectionState) => {
       if (state === ConnectionState.CONNECTED) {
         if (hasConnectedRef.current) {
