@@ -50,12 +50,9 @@ export function useConnectionState(
       updateStatus(state);
     };
 
-    deliveryService.onStateChange(handleStateChange);
+    const unsubscribe = deliveryService.onStateChange(handleStateChange);
 
-    return () => {
-      // Cleanup: unsubscribe from state changes
-      deliveryService.offStateChange(handleStateChange);
-    };
+    return unsubscribe;
   }, [deliveryService]);
 
   return status;

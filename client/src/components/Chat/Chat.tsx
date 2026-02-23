@@ -10,6 +10,7 @@ import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
 import { KeyManager } from '../../utils/keyManager';
 import { encryptString, decryptString } from '../../utils/crypto';
 import { ArrowLeft, UserPlus, Users, Lock, Paperclip, Download } from 'lucide-react';
+import { ConnectionState } from '../../utils/WebSocketManager';
 import { senderColor } from '../../utils/senderColor';
 import { FileCard } from '../ui/Molecules/FileCard';
 import { encryptFile, decryptFile, compressImageForChat, extractVideoThumbnail } from '../../utils/fileEncryption';
@@ -326,10 +327,27 @@ const Chat: React.FC<ChatProps> = ({
   const [memberAvatars, setMemberAvatars] = useState<Map<string, string>>(new Map());
   const [linkPreviews, setLinkPreviews] = useState<Map<string, LinkPreview | null>>(new Map());
   const [mediaCache, setMediaCache] = useState<Map<string, string>>(new Map());
+  // Incremented on WebSocket reconnect to trigger a history re-fetch for missed messages.
+  const [reconnectCount, setReconnectCount] = useState(0);
+  const hasConnectedRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toast = useToastContext();
+
+  // Re-fetch history when WebSocket reconnects so messages sent during outage appear.
+  useEffect(() => {
+    const unsubscribe = deliveryService.onStateChange((state: ConnectionState) => {
+      if (state === ConnectionState.CONNECTED) {
+        if (hasConnectedRef.current) {
+          // This is a reconnect (not the initial connection).
+          setReconnectCount(c => c + 1);
+        }
+        hasConnectedRef.current = true;
+      }
+    });
+    return unsubscribe;
+  }, [deliveryService]);
 
   const handleMediaDecrypted = (fileUrl: string, objectUrl: string) => {
     setMediaCache(prev => new Map(prev).set(fileUrl, objectUrl));
@@ -491,6 +509,7 @@ const Chat: React.FC<ChatProps> = ({
               continue;
             }
             // MLS decryption failed (e.g. old epoch) — fall through to server cache
+            console.warn('[Chat] MLS decrypt failed for seq', m.server_seq, ':', e);
           }
 
           // 3. Server cache fallback — for messages from old epochs or cross-device
@@ -544,7 +563,7 @@ const Chat: React.FC<ChatProps> = ({
     };
     loadHistory();
     return () => { mounted = false; };
-  }, [groupId, userId, deviceId, mlsGroup, mlsClient]);
+  }, [groupId, userId, deviceId, mlsGroup, mlsClient, reconnectCount]);
 
   // Subscribe and handle incoming messages
   useEffect(() => {

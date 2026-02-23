@@ -329,23 +329,16 @@ export class DeliveryServiceSupabase implements DeliveryService {
   }
 
   /**
-   * Subscribe to connection state changes
+   * Subscribe to connection state changes.
+   * Returns an unsubscribe function — call it in useEffect cleanup to avoid leaks.
    */
-  onStateChange(callback: (state: ConnectionState) => void): void {
+  onStateChange(callback: (state: ConnectionState) => void): () => void {
     const handler = (event: Event) => {
       const customEvent = event as CustomEvent<ConnectionState>;
       callback(customEvent.detail);
     };
     this.eventTarget.addEventListener('stateChange', handler as EventListener);
-  }
-
-  /**
-   * Unsubscribe from connection state changes
-   */
-  offStateChange(callback: (state: ConnectionState) => void): void {
-    // Note: This is a simplified version. In production, you'd need to store
-    // a reference to the wrapped handler to properly remove it.
-    this.eventTarget.removeEventListener('stateChange', callback as EventListener);
+    return () => this.eventTarget.removeEventListener('stateChange', handler as EventListener);
   }
 
   /**
