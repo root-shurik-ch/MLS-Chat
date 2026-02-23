@@ -92,8 +92,9 @@ async function uploadMessageToCache(
   serverSeq: number,
   text: string,
   senderId: string,
-  deviceId: string,
+  senderDeviceId: string,
   userId: string,
+  myDeviceId: string,  // current user's own device — used for server auth
   timestamp: number,
 ): Promise<void> {
   if (!SUPABASE_URL) return;
@@ -103,7 +104,7 @@ async function uploadMessageToCache(
   if (!kMsgCache) return; // Not available until passkey auth — skip silently
 
   const aad = `${groupId}:${serverSeq}`;
-  const payload: CachedMsgPayload = { text, senderId, deviceId, timestamp };
+  const payload: CachedMsgPayload = { text, senderId, deviceId: senderDeviceId, timestamp };
   const plaintextEnc = await encryptString(JSON.stringify(payload), kMsgCache, aad);
 
   await fetch(`${SUPABASE_URL}/functions/v1/message_cache_sync`, {
@@ -114,7 +115,7 @@ async function uploadMessageToCache(
       group_id: groupId,
       server_seq: serverSeq,
       user_id: userId,
-      device_id: deviceId,
+      device_id: myDeviceId,  // must belong to userId — sender's device may differ
       plaintext_enc: plaintextEnc,
     }),
   });
@@ -492,23 +493,29 @@ const Chat: React.FC<ChatProps> = ({
             continue;
           }
 
-          // 2. Try MLS decryption (serialized to avoid SecretReuseError)
+          // 2. Try MLS decryption — the entire cache-check + decrypt + cache-write is inside
+          //    the mutex so no concurrent op can race to decrypt the same message.
           try {
-            const plaintext = await runMlsOp(() => mlsClient.decryptMessage(mlsGroup, m.mls_bytes));
-            await saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
-              .catch(() => {});
-            // Upload encrypted copy to server cache (fire-and-forget)
-            uploadMessageToCache(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, userId, ts)
+            const result = await runMlsOp(async () => {
+              // Re-check cache inside mutex: a concurrent op may have just written it
+              const locked = await getCachedMessage(groupId, m.server_seq).catch(() => null);
+              if (locked) return locked;
+              const text = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
+              // Write to cache before releasing the mutex so the next op sees it
+              await saveSentMessage(groupId, m.server_seq, text, m.sender_id, m.device_id, ts).catch(() => {});
+              return { text, senderId: m.sender_id, deviceId: m.device_id, timestamp: ts };
+            });
+            uploadMessageToCache(groupId, m.server_seq, result.text, result.senderId, result.deviceId, userId, deviceId, ts)
               .catch(() => {});
             if (m.server_seq > maxSeqRef.current) maxSeqRef.current = m.server_seq;
             parsed.push({
               id: `msg_${m.server_seq}`,
-              senderId: m.sender_id,
-              deviceId: m.device_id,
-              text: plaintext,
-              timestamp: ts,
+              senderId: result.senderId,
+              deviceId: result.deviceId,
+              text: result.text,
+              timestamp: result.timestamp,
               serverSeq: m.server_seq,
-              isSent: m.sender_id === userId,
+              isSent: result.senderId === userId,
             });
             continue;
           } catch (e) {
@@ -518,7 +525,7 @@ const Chat: React.FC<ChatProps> = ({
               if (cached) {
                 await saveSentMessage(groupId, m.server_seq, text, m.sender_id, m.device_id, ts)
                   .catch(() => {});
-                uploadMessageToCache(groupId, m.server_seq, text, m.sender_id, m.device_id, userId, ts)
+                uploadMessageToCache(groupId, m.server_seq, text, m.sender_id, m.device_id, userId, deviceId, ts)
                   .catch(() => {});
               }
               if (m.server_seq > maxSeqRef.current) maxSeqRef.current = m.server_seq;
@@ -617,20 +624,24 @@ const Chat: React.FC<ChatProps> = ({
           }
 
           try {
-            const plaintext = await runMlsOp(() => mlsClient.decryptMessage(mlsGroup, msg.mlsBytes));
-            saveSentMessage(groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, msg.serverTime)
-              .catch(() => {});
-            // Upload encrypted copy to server cache (fire-and-forget)
+            const result = await runMlsOp(async () => {
+              // Re-check cache: concurrent loadHistory may have already processed this message
+              const locked = await getCachedMessage(groupId, msg.serverSeq).catch(() => null);
+              if (locked) return locked;
+              const text = await mlsClient.decryptMessage(mlsGroup, msg.mlsBytes);
+              await saveSentMessage(groupId, msg.serverSeq, text, msg.senderId, msg.deviceId, msg.serverTime).catch(() => {});
+              return { text, senderId: msg.senderId, deviceId: msg.deviceId, timestamp: msg.serverTime };
+            });
             uploadMessageToCache(
-              groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, userId, msg.serverTime
+              groupId, msg.serverSeq, result.text, result.senderId, result.deviceId, userId, deviceId, msg.serverTime
             ).catch(() => {});
             if (msg.serverSeq > maxSeqRef.current) maxSeqRef.current = msg.serverSeq;
             const newMessage: Message = {
               id: `msg_${msg.serverSeq}`,
-              senderId: msg.senderId,
-              deviceId: msg.deviceId,
-              text: plaintext,
-              timestamp: msg.serverTime,
+              senderId: result.senderId,
+              deviceId: result.deviceId,
+              text: result.text,
+              timestamp: result.timestamp,
               serverSeq: msg.serverSeq,
               isSent: false,
             };
@@ -701,7 +712,7 @@ const Chat: React.FC<ChatProps> = ({
         const sentAt = Date.now();
         saveSentMessage(groupId, serverSeq, text, userId, deviceId, sentAt)
           .catch(e => console.warn('Failed to cache sent message:', e));
-        uploadMessageToCache(groupId, serverSeq, text, userId, deviceId, userId, sentAt)
+        uploadMessageToCache(groupId, serverSeq, text, userId, deviceId, userId, deviceId, sentAt)
           .catch(() => {});
       }
 
@@ -833,7 +844,7 @@ const Chat: React.FC<ChatProps> = ({
         const sentAt = Date.now();
         saveSentMessage(groupId, serverSeq, payloadStr, userId, deviceId, sentAt)
           .catch(() => {});
-        uploadMessageToCache(groupId, serverSeq, payloadStr, userId, deviceId, userId, sentAt)
+        uploadMessageToCache(groupId, serverSeq, payloadStr, userId, deviceId, userId, deviceId, sentAt)
           .catch(() => {});
       }
 
