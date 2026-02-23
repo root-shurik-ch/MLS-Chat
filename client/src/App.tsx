@@ -76,6 +76,7 @@ const App: React.FC = () => {
   const mlsClientRef = useRef<MlsClient | null>(null);
   const deliveryServiceRef = useRef<DeliveryServiceSupabase | null>(null);
   const [mlsGroups, setMlsGroups] = useState<Map<string, MlsGroup>>(new Map());
+  const [stateLostGroups, setStateLostGroups] = useState<Set<string>>(new Set());
   const [isConnecting, setIsConnecting] = useState(false);
   const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -109,6 +110,7 @@ const App: React.FC = () => {
 
       try {
         let stateJson = await loadWasmState(userId);
+        let stateSource = 'IndexedDB';
 
         // If no local state, attempt server download (e.g. new device, cleared IndexedDB).
         // Requires kWasm in IndexedDB — available after passkey auth; skipped silently otherwise.
@@ -116,13 +118,13 @@ const App: React.FC = () => {
           stateJson = await downloadWasmStateFromServer(userId, _deviceId);
           if (stateJson) {
             await saveWasmState(userId, stateJson); // cache locally for next time
-            console.log('Restored WASM state from server');
+            stateSource = 'server';
           }
         }
 
         if (stateJson && mlsClientRef.current) {
           await mlsClientRef.current.importState(stateJson);
-          console.log('Restored WASM state from IndexedDB');
+          console.log(`Restored WASM state from ${stateSource}`);
 
           const storedGroups = await loadAllMlsGroups();
           const restoredGroups = new Map<string, MlsGroup>();
@@ -332,16 +334,20 @@ const App: React.FC = () => {
           }
         }
 
+        let stateWasLost = false;
         if (!mlsGroup && storedGroup) {
-          // WASM state is unrecoverable (likely deleted on a previous logout).
-          // Remove the stale record so we can reinitialize a fresh MLS state below.
-          // Old messages will not decrypt, but the group becomes usable again.
-          console.warn('WASM state unrecoverable for group, resetting local state:', groupId);
+          // MLS keys are gone — creating a new group would produce a different MLS
+          // group ID hex, making all existing ciphertexts undecryptable (WrongGroupId).
+          // Mark as unavailable; the user must request a re-invite.
+          stateWasLost = true;
+          console.warn('WASM state unrecoverable for group, marking unavailable:', groupId);
           await deleteMlsGroup(storedGroup.id).catch(() => {});
-          toast.warning('Encryption state was reset. Old messages may not be visible.');
+          setStateLostGroups(prev => new Set([...prev, groupId]));
+          toast.warning('Encryption keys unavailable. Request a re-invite to restore access.');
         }
 
-        if (!mlsGroup) {
+        if (!mlsGroup && !stateWasLost) {
+          // Truly new group (no prior record) — initialize fresh MLS state.
           mlsGroup = await mlsClientRef.current.createGroup(groupId);
           const newGroups = new Map(mlsGroups);
           newGroups.set(groupId, mlsGroup);
@@ -615,14 +621,18 @@ const App: React.FC = () => {
 
   // Chat view
   const currentMlsGroup = currentGroupId ? mlsGroups.get(currentGroupId) : null;
+  const currentGroupStateLost = currentGroupId ? stateLostGroups.has(currentGroupId) : false;
 
   if (!currentMlsGroup || !mlsClientRef.current || !deliveryServiceRef.current) {
+    const statusText = currentGroupStateLost
+      ? 'Encryption keys unavailable \u2014 request a re-invite'
+      : 'Loading\u2026';
     return (
       <div className="h-dvh bg-black text-white flex overflow-hidden">
         <ConnectionStatus deliveryService={deliveryServiceRef.current} />
         <Sidebar />
         <main className="flex-1 flex items-center justify-center">
-          <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">Loading…</p>
+          <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest">{statusText}</p>
         </main>
         {ProfileModalOverlay}
       </div>
