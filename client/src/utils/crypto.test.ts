@@ -1,60 +1,18 @@
 // src/utils/crypto.test.ts
-import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
-  deriveKEnc,
-  encryptMlsPrivateKey,
-  decryptMlsPrivateKey,
   base64urlEncode,
   sha256,
   generateDeviceId,
   generateMlsKeys,
   deriveUserId,
+  deriveKWasmState,
+  deriveKMsgCache,
+  encryptString,
+  decryptString,
 } from './crypto'
 
-beforeAll(() => {
-  // Mock crypto.getRandomValues
-  Object.defineProperty(globalThis, 'crypto', {
-    value: {
-      ...globalThis.crypto,
-      getRandomValues: vi.fn((array) => {
-        for (let i = 0; i < array.length; i++) {
-          array[i] = Math.floor(Math.random() * 256)
-        }
-        return array
-      }),
-      subtle: {
-        importKey: vi.fn(() => Promise.resolve({})),
-        deriveKey: vi.fn(() => Promise.resolve({})),
-        encrypt: vi.fn(() => Promise.resolve(new Uint8Array(48))), // Mock ciphertext + tag
-        decrypt: vi.fn((params, key, data) => Promise.resolve(data.slice(0, 32))), // Mock plaintext
-        digest: vi.fn(() => Promise.resolve(new ArrayBuffer(32))),
-      },
-    },
-  })
-})
-
 describe('crypto utils', () => {
-  it('should derive KEnc from PRF output', async () => {
-    const prfOutput = new Uint8Array(32)
-    const key = await deriveKEnc(prfOutput)
-    expect(key).toBeDefined()
-    expect(crypto.subtle.importKey).toHaveBeenCalled()
-    expect(crypto.subtle.deriveKey).toHaveBeenCalled()
-  })
-
-  it('should encrypt and decrypt MLS private key', async () => {
-    const privateKey = new Uint8Array(32)
-    const kEnc = {} as CryptoKey
-    const userId = 'user123'
-
-    const encrypted = await encryptMlsPrivateKey(privateKey, kEnc, userId)
-    expect(encrypted).toBeDefined()
-    expect(typeof encrypted).toBe('string')
-
-    const decrypted = await decryptMlsPrivateKey(encrypted, kEnc, userId)
-    expect(decrypted).toEqual(privateKey)
-  })
-
   it('should base64url encode bytes', () => {
     const bytes = new Uint8Array([1, 2, 3, 4])
     const encoded = base64urlEncode(bytes)
@@ -68,10 +26,10 @@ describe('crypto utils', () => {
     expect(hash.length).toBe(32)
   })
 
-  it('should generate device ID', () => {
+  it('should generate device ID as non-empty string', () => {
     const deviceId = generateDeviceId()
-    expect(deviceId).toBeDefined()
     expect(typeof deviceId).toBe('string')
+    expect(deviceId.length).toBeGreaterThan(0)
   })
 
   it('should generate MLS keys', async () => {
@@ -83,7 +41,37 @@ describe('crypto utils', () => {
   it('should derive user ID from MLS public key', () => {
     const publicKey = new Uint8Array(32)
     const userId = deriveUserId(publicKey)
-    expect(userId).toBeDefined()
     expect(typeof userId).toBe('string')
+    expect(userId.length).toBeGreaterThan(0)
+  })
+
+  it('deriveKWasmState and deriveKMsgCache are domain-separated', async () => {
+    const prf = crypto.getRandomValues(new Uint8Array(32))
+    const kWasm = await deriveKWasmState(prf)
+    const kMsgCache = await deriveKMsgCache(prf)
+    // Both return CryptoKey objects
+    expect(kWasm).toBeInstanceOf(CryptoKey)
+    expect(kMsgCache).toBeInstanceOf(CryptoKey)
+    // Same PRF → different keys (different HKDF info strings)
+    // We verify by round-tripping encryption: a ciphertext from kWasm must not decrypt with kMsgCache
+    const plain = 'hello'
+    const enc = await encryptString(plain, kWasm, 'aad')
+    await expect(decryptString(enc, kMsgCache, 'aad')).rejects.toThrow()
+  })
+
+  it('encryptString / decryptString round-trip', async () => {
+    const prf = crypto.getRandomValues(new Uint8Array(32))
+    const key = await deriveKWasmState(prf)
+    const plaintext = 'the quick brown fox'
+    const encrypted = await encryptString(plaintext, key, 'test-aad')
+    const decrypted = await decryptString(encrypted, key, 'test-aad')
+    expect(decrypted).toBe(plaintext)
+  })
+
+  it('decryptString fails with wrong AAD', async () => {
+    const prf = crypto.getRandomValues(new Uint8Array(32))
+    const key = await deriveKWasmState(prf)
+    const encrypted = await encryptString('secret', key, 'correct-aad')
+    await expect(decryptString(encrypted, key, 'wrong-aad')).rejects.toThrow()
   })
 })

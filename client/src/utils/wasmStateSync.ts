@@ -3,7 +3,7 @@
 // so the server never sees plaintext state.
 
 import { KeyManager } from './keyManager';
-import { encryptString } from './crypto';
+import { encryptString, decryptString } from './crypto';
 import { saveWasmState } from './mlsGroupStorage';
 
 /**
@@ -22,6 +22,39 @@ export async function saveAndSyncWasmState(
   uploadWasmStateToServer(userId, deviceId, stateJson).catch(
     e => console.warn('WASM state remote sync failed:', e),
   );
+}
+
+/**
+ * Download and decrypt the WASM state from the server.
+ * Returns the plaintext stateJson if the server has a copy, or null otherwise.
+ * Requires kWasm to be stored in IndexedDB (set during passkey auth).
+ */
+export async function downloadWasmStateFromServer(
+  userId: string,
+  deviceId: string,
+): Promise<string | null> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  if (!supabaseUrl) return null;
+
+  const km = new KeyManager();
+  await km.init();
+  const kWasm = await km.getKWasmState(userId);
+  if (!kWasm) return null; // No kWasm → can't decrypt (need passkey re-auth)
+
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/sync_state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, device_id: deviceId, action: 'get' }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { wasm_state_enc?: string | null };
+    if (!data.wasm_state_enc) return null;
+    return await decryptString(data.wasm_state_enc, kWasm, userId);
+  } catch (e) {
+    console.warn('[wasmStateSync] Failed to download WASM state from server:', e);
+    return null;
+  }
 }
 
 async function uploadWasmStateToServer(

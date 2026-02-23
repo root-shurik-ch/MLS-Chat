@@ -9,8 +9,8 @@ import {
 import {
   generateDeviceId,
   deriveMLSPrivateKey,
-  deriveKEnc,
   deriveKWasmState,
+  deriveKMsgCache,
   sha256,
   encodeBase64Url,
 } from '../../utils/crypto';
@@ -89,9 +89,9 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
       const mlsPrivateKey = await deriveMLSPrivateKey(prfOutput);
       const mlsPublicKey = await sha256(mlsPrivateKey); // Mock public key derivation
 
-      // Derive and store kEnc (for any future symmetric encryption) and kWasm.
-      const kEnc = await deriveKEnc(prfOutput);
+      // Derive kWasm (WASM state encryption) and kMsgCache (server message cache encryption).
       const kWasm = await deriveKWasmState(prfOutput);
+      const kMsgCache = await deriveKMsgCache(prfOutput);
 
       const webauthnCreateResponse = serializeCreationResult({
         credentialId: createResult.credentialId,
@@ -109,8 +109,9 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onSuccess }) => {
       });
 
       // Store keys locally in IndexedDB — private key never leaves this device.
-      await keyManager.storeKeys(userId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
+      await keyManager.storeKeys(userId, deviceId, mlsPrivateKey, mlsPublicKey);
       await keyManager.storeKWasmState(userId, kWasm);
+      await keyManager.storeKMsgCache(userId, kMsgCache);
 
       localStorage.setItem('userId', userId);
       localStorage.setItem('deviceId', deviceId);

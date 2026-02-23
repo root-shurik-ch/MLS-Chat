@@ -304,7 +304,7 @@ export function serializeGetResponse(credential: PublicKeyCredential): Record<st
 /**
  * Authenticate with resident/discoverable key (no credentialId needed).
  * Browser shows passkey picker.
- * userId is required for PRF salt (same as at registration) to derive kEnc for key decryption.
+ * userId is required for PRF salt (same as at registration) to derive kWasm and kMsgCache.
  */
 export async function authenticatePasskeyDiscoverable(
   challenge: string,

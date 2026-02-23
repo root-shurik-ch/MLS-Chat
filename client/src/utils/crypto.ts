@@ -9,38 +9,9 @@ function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
-export async function deriveKEnc(prfOutput: Uint8Array): Promise<CryptoKey> {
-  const salt = new TextEncoder().encode("MLS-KDF-Salt");
-  const info = new TextEncoder().encode("MLS-PrivateKey-Encryption");
-  // NOTE: keep "MLS-PrivateKey-Encryption" as info here — changing it
-  // would invalidate all existing mls_sk_enc values in the DB.
-
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    toArrayBuffer(prfOutput),
-    'HKDF',
-    false,
-    ['deriveKey']
-  );
-
-  return crypto.subtle.deriveKey(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: toArrayBuffer(salt),
-      info: toArrayBuffer(info),
-    },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-
 /**
  * Derive the AES-256 key used to encrypt/decrypt the WASM state blob.
- * Uses a different HKDF info string than deriveKEnc so the two keys are
- * domain-separated — compromising one does not compromise the other.
+ * Domain-separated from kMsgCache via distinct HKDF info strings.
  * Output is the same on any device that authenticates with the same passkey.
  */
 export async function deriveKWasmState(prfOutput: Uint8Array): Promise<CryptoKey> {
@@ -63,6 +34,27 @@ export async function deriveKWasmState(prfOutput: Uint8Array): Promise<CryptoKey
  * Encrypt an arbitrary UTF-8 string (e.g. JSON) with AES-256-GCM.
  * Returns base64-encoded ciphertext||iv.
  */
+/**
+ * Derive the AES-256 key used to encrypt/decrypt the server-side message cache.
+ * Domain-separated from kEnc and kWasm via info = "mls-msgcache-v1".
+ * Same passkey PRF → same key on every device the user owns.
+ */
+export async function deriveKMsgCache(prfOutput: Uint8Array): Promise<CryptoKey> {
+  const salt = new TextEncoder().encode("MLS-KDF-Salt");
+  const info = new TextEncoder().encode("mls-msgcache-v1");
+
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', toArrayBuffer(prfOutput), 'HKDF', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: toArrayBuffer(salt), info: toArrayBuffer(info) },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
 export async function encryptString(
   plaintext: string,
   key: CryptoKey,
@@ -99,49 +91,6 @@ export async function decryptString(
     ciphertext,
   );
   return new TextDecoder().decode(plaintext);
-}
-
-export async function encryptMlsPrivateKey(
-  mlsPrivateKeyBytes: Uint8Array,
-  kEnc: CryptoKey,
-  userId: string
-): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const aad = new TextEncoder().encode(userId);
-
-  const cipher = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv), additionalData: toArrayBuffer(aad) },
-    kEnc,
-    toArrayBuffer(mlsPrivateKeyBytes)
-  );
-
-  const ciphertext = new Uint8Array(cipher);
-  const combined = new Uint8Array(ciphertext.length + iv.length);
-  combined.set(ciphertext);
-  combined.set(iv, ciphertext.length);
-
-  return btoa(String.fromCharCode(...combined));
-}
-
-export async function decryptMlsPrivateKey(
-  encrypted: string,
-  kEnc: CryptoKey,
-  userId: string
-): Promise<Uint8Array> {
-  const combined = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
-  const ciphertextLen = combined.length - 12;
-  const ciphertext = combined.slice(0, ciphertextLen);
-  const iv = combined.slice(ciphertextLen);
-
-  const aad = new TextEncoder().encode(userId);
-
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv), additionalData: toArrayBuffer(aad) },
-    kEnc,
-    toArrayBuffer(ciphertext)
-  );
-
-  return new Uint8Array(plaintext);
 }
 
 export function base64urlEncode(bytes: Uint8Array): string {

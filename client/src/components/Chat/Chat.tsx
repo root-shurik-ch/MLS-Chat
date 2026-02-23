@@ -7,6 +7,8 @@ import InviteLink from '../Group/InviteLink';
 import GroupMembers from '../Group/GroupMembers';
 import { saveSentMessage, getSentMessage, getCachedMessage } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
+import { KeyManager } from '../../utils/keyManager';
+import { encryptString, decryptString } from '../../utils/crypto';
 import { ArrowLeft, UserPlus, Users, Lock, Paperclip, Download } from 'lucide-react';
 import { senderColor } from '../../utils/senderColor';
 import { FileCard } from '../ui/Molecules/FileCard';
@@ -71,6 +73,101 @@ function parseFilePayload(text: string): FilePayload | null {
     if (j.t === 'file' && j.url && j.k && j.iv) return j as FilePayload;
   } catch {}
   return null;
+}
+
+interface CachedMsgPayload {
+  text: string;
+  senderId: string;
+  deviceId: string;
+  timestamp: number;
+}
+
+/**
+ * Upload an encrypted copy of a decrypted message to the server message cache.
+ * Fire-and-forget — never blocks the caller. Requires kMsgCache in IndexedDB.
+ */
+async function uploadMessageToCache(
+  groupId: string,
+  serverSeq: number,
+  text: string,
+  senderId: string,
+  deviceId: string,
+  userId: string,
+  timestamp: number,
+): Promise<void> {
+  if (!SUPABASE_URL) return;
+  const km = new KeyManager();
+  await km.init();
+  const kMsgCache = await km.getKMsgCache(userId);
+  if (!kMsgCache) return; // Not available until passkey auth — skip silently
+
+  const aad = `${groupId}:${serverSeq}`;
+  const payload: CachedMsgPayload = { text, senderId, deviceId, timestamp };
+  const plaintextEnc = await encryptString(JSON.stringify(payload), kMsgCache, aad);
+
+  await fetch(`${SUPABASE_URL}/functions/v1/message_cache_sync`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      action: 'upsert',
+      group_id: groupId,
+      server_seq: serverSeq,
+      user_id: userId,
+      device_id: deviceId,
+      plaintext_enc: plaintextEnc,
+    }),
+  });
+}
+
+/**
+ * Fetch encrypted messages from the server cache and decrypt them with kMsgCache.
+ * Returns a Map from server_seq to CachedMsgPayload.
+ */
+async function fetchMessagesFromServerCache(
+  groupId: string,
+  userId: string,
+  deviceId: string,
+  seqs: number[],
+): Promise<Map<number, CachedMsgPayload>> {
+  const result = new Map<number, CachedMsgPayload>();
+  if (!SUPABASE_URL || seqs.length === 0) return result;
+
+  const km = new KeyManager();
+  await km.init();
+  const kMsgCache = await km.getKMsgCache(userId);
+  if (!kMsgCache) return result;
+
+  // Fetch all cached entries since the minimum seq in our list
+  const minSeq = Math.min(...seqs) - 1;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/message_cache_sync`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        action: 'fetch',
+        group_id: groupId,
+        user_id: userId,
+        device_id: deviceId,
+        since_seq: minSeq,
+      }),
+    });
+    if (!res.ok) return result;
+    const data = await res.json() as { messages?: Array<{ server_seq: number; plaintext_enc: string }> };
+    const seqSet = new Set(seqs);
+    for (const row of data.messages ?? []) {
+      if (!seqSet.has(row.server_seq)) continue;
+      try {
+        const aad = `${groupId}:${row.server_seq}`;
+        const plainJson = await decryptString(row.plaintext_enc, kMsgCache, aad);
+        result.set(row.server_seq, JSON.parse(plainJson) as CachedMsgPayload);
+      } catch {
+        // Corrupted or encrypted with a different key — skip
+      }
+    }
+  } catch {
+    // Network error — return what we have
+  }
+  return result;
 }
 
 // FilePreview renders inside a chat bubble for file messages.
@@ -313,6 +410,19 @@ const Chat: React.FC<ChatProps> = ({
           mls_bytes: string;
         }> };
         if (!Array.isArray(list) || list.length === 0) return;
+
+        // Collect seq numbers that will need MLS decrypt, to pre-fetch server cache in one request
+        const chatMessages = list.filter(m => m.msg_kind !== 'commit');
+        const seqsMissingLocal: number[] = [];
+        for (const m of chatMessages) {
+          const cached = await getCachedMessage(groupId, m.server_seq).catch(() => null);
+          if (!cached) seqsMissingLocal.push(m.server_seq);
+        }
+        // Pre-fetch server cache for all messages not in local IndexedDB
+        const serverCacheMap = await fetchMessagesFromServerCache(
+          groupId, userId, deviceId, seqsMissingLocal
+        );
+
         const parsed: Message[] = [];
         for (const m of list) {
           if (m.msg_kind === 'commit') {
@@ -326,6 +436,7 @@ const Chat: React.FC<ChatProps> = ({
             ? m.server_time
             : new Date(m.server_time as string).getTime();
 
+          // 1. Local IndexedDB cache hit
           const cachedMsg = await getCachedMessage(groupId, m.server_seq).catch(() => null);
           if (cachedMsg) {
             parsed.push({
@@ -340,9 +451,13 @@ const Chat: React.FC<ChatProps> = ({
             continue;
           }
 
+          // 2. Try MLS decryption
           try {
             const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
             await saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
+              .catch(() => {});
+            // Upload encrypted copy to server cache (fire-and-forget)
+            uploadMessageToCache(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, userId, ts)
               .catch(() => {});
             parsed.push({
               id: `msg_${m.server_seq}`,
@@ -353,12 +468,15 @@ const Chat: React.FC<ChatProps> = ({
               serverSeq: m.server_seq,
               isSent: m.sender_id === userId,
             });
+            continue;
           } catch (e) {
             if (String(e).includes('CannotDecryptOwnMessage')) {
               const cached = await getSentMessage(groupId, m.server_seq).catch(() => null);
               const text = cached ?? '(your message — text unavailable on this device)';
               if (cached) {
                 await saveSentMessage(groupId, m.server_seq, text, m.sender_id, m.device_id, ts)
+                  .catch(() => {});
+                uploadMessageToCache(groupId, m.server_seq, text, m.sender_id, m.device_id, userId, ts)
                   .catch(() => {});
               }
               parsed.push({
@@ -370,8 +488,31 @@ const Chat: React.FC<ChatProps> = ({
                 serverSeq: m.server_seq,
                 isSent: true,
               });
+              continue;
             }
+            // MLS decryption failed (e.g. old epoch) — fall through to server cache
           }
+
+          // 3. Server cache fallback — for messages from old epochs or cross-device
+          const serverMsg = serverCacheMap.get(m.server_seq);
+          if (serverMsg) {
+            await saveSentMessage(
+              groupId, m.server_seq, serverMsg.text,
+              serverMsg.senderId, serverMsg.deviceId, serverMsg.timestamp,
+            ).catch(() => {});
+            parsed.push({
+              id: `msg_${m.server_seq}`,
+              senderId: serverMsg.senderId,
+              deviceId: serverMsg.deviceId,
+              text: serverMsg.text,
+              timestamp: serverMsg.timestamp,
+              serverSeq: m.server_seq,
+              isSent: serverMsg.senderId === userId,
+            });
+            continue;
+          }
+
+          // 4. Unrecoverable — message not in any cache
         }
         if (mounted) {
           setMessages(prev => {
@@ -434,6 +575,10 @@ const Chat: React.FC<ChatProps> = ({
             const plaintext = await mlsClient.decryptMessage(mlsGroup, msg.mlsBytes);
             saveSentMessage(groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, msg.serverTime)
               .catch(() => {});
+            // Upload encrypted copy to server cache (fire-and-forget)
+            uploadMessageToCache(
+              groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, userId, msg.serverTime
+            ).catch(() => {});
             const newMessage: Message = {
               id: `msg_${msg.serverSeq}`,
               senderId: msg.senderId,
@@ -507,8 +652,11 @@ const Chat: React.FC<ChatProps> = ({
       });
 
       if (serverSeq > 0) {
-        saveSentMessage(groupId, serverSeq, text, userId, deviceId, Date.now())
+        const sentAt = Date.now();
+        saveSentMessage(groupId, serverSeq, text, userId, deviceId, sentAt)
           .catch(e => console.warn('Failed to cache sent message:', e));
+        uploadMessageToCache(groupId, serverSeq, text, userId, deviceId, userId, sentAt)
+          .catch(() => {});
       }
 
       setMessages(prev =>
@@ -636,7 +784,10 @@ const Chat: React.FC<ChatProps> = ({
       });
 
       if (serverSeq > 0) {
-        saveSentMessage(groupId, serverSeq, payloadStr, userId, deviceId, Date.now())
+        const sentAt = Date.now();
+        saveSentMessage(groupId, serverSeq, payloadStr, userId, deviceId, sentAt)
+          .catch(() => {});
+        uploadMessageToCache(groupId, serverSeq, payloadStr, userId, deviceId, userId, sentAt)
           .catch(() => {});
       }
 

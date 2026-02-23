@@ -9,8 +9,8 @@ import ProfileModal from './components/Profile/ProfileModal';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
-import { saveMlsGroup, loadAllMlsGroups, loadWasmState, deleteMlsGroup } from './utils/mlsGroupStorage';
-import { saveAndSyncWasmState } from './utils/wasmStateSync';
+import { saveMlsGroup, loadAllMlsGroups, loadWasmState, saveWasmState, deleteMlsGroup } from './utils/mlsGroupStorage';
+import { saveAndSyncWasmState, downloadWasmStateFromServer } from './utils/wasmStateSync';
 import { IndexedDBStorage } from './utils/storage';
 import { registerPushNotifications, requestAndRegisterPush } from './utils/pushNotifications';
 import { Lock, LogOut, Bell, UserCircle } from 'lucide-react';
@@ -107,7 +107,18 @@ const App: React.FC = () => {
       await deliveryServiceRef.current.connect(wsUrl, authToken);
 
       try {
-        const stateJson = await loadWasmState(userId);
+        let stateJson = await loadWasmState(userId);
+
+        // If no local state, attempt server download (e.g. new device, cleared IndexedDB).
+        // Requires kWasm in IndexedDB — available after passkey auth; skipped silently otherwise.
+        if (!stateJson) {
+          stateJson = await downloadWasmStateFromServer(userId, _deviceId);
+          if (stateJson) {
+            await saveWasmState(userId, stateJson); // cache locally for next time
+            console.log('Restored WASM state from server');
+          }
+        }
+
         if (stateJson && mlsClientRef.current) {
           await mlsClientRef.current.importState(stateJson);
           console.log('Restored WASM state from IndexedDB');

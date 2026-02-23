@@ -10,8 +10,8 @@ import {
   decodeBase64Url,
   decryptString,
   deriveMLSPrivateKey,
-  deriveKEnc,
   deriveKWasmState,
+  deriveKMsgCache,
   sha256,
 } from '../../utils/crypto';
 import { KeyManager } from '../../utils/keyManager';
@@ -98,13 +98,14 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
           ? decodeBase64Url(serverMlsPublicKey)
           : derivedMlsPublicKey;
 
-      // Derive and store symmetric keys
-      const kEnc = await deriveKEnc(prfOutput);
+      // Derive kWasm (WASM state encryption) and kMsgCache (server message cache encryption).
       const kWasm = await deriveKWasmState(prfOutput);
+      const kMsgCache = await deriveKMsgCache(prfOutput);
 
       // Store keys locally in IndexedDB — private key never leaves this device.
-      await keyManager.storeKeys(resolvedUserId, deviceId, mlsPrivateKey, mlsPublicKey, kEnc);
+      await keyManager.storeKeys(resolvedUserId, deviceId, mlsPrivateKey, mlsPublicKey);
       await keyManager.storeKWasmState(resolvedUserId, kWasm);
+      await keyManager.storeKMsgCache(resolvedUserId, kMsgCache);
 
       // Restore WASM state from server if available (contains group epoch secrets)
       if (wasmStateEnc) {
