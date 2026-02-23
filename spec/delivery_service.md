@@ -86,10 +86,10 @@ DS → Client:
 
 | `msg_kind` | Description |
 |---|---|
-| `chat` | An MLS application message containing encrypted plaintext. Decrypted and displayed by recipients. |
-| `handshake` | An MLS handshake message (Proposal or Commit sent directly via DS by a client). Processed before application messages per RFC 9750. |
-| `control` | Reserved for application-level control messages (e.g. group rename, typing indicators). Not yet used. |
-| `commit` | An MLS Commit distributing an epoch advance (e.g. from `add_member`) to existing group members. **Never displayed as a chat message.** Clients call `applyCommit` when receiving this kind and save the updated WASM state. |
+| `chat` | An MLS application message containing encrypted plaintext. Decrypted and displayed by recipients. **Implemented.** |
+| `commit` | An MLS Commit distributing an epoch advance (e.g. from `add_member`) to existing group members. **Never displayed as a chat message.** Clients call `applyCommit` when receiving this kind and save the updated WASM state. **Implemented.** |
+| `handshake` | An MLS handshake message (Proposal or Commit sent directly via DS by a client). **Reserved — not used by the current client.** |
+| `control` | Application-level control messages (e.g. group rename, typing indicators). **Reserved — not yet implemented.** |
 
 ### `commit` message semantics
 

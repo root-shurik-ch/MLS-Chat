@@ -117,20 +117,6 @@ export async function deleteMlsGroup(id: string): Promise<void> {
   });
 }
 
-/**
- * Clear all MLS groups from IndexedDB
- */
-export async function clearAllMlsGroups(): Promise<void> {
-  const db = await openDB();
-  const transaction = db.transaction([STORE_NAME], 'readwrite');
-  const store = transaction.objectStore(STORE_NAME);
-  store.clear();
-
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-}
 
 /**
  * Save the full WASM state JSON for a user (backend storage + signer).
@@ -166,20 +152,6 @@ export async function loadWasmState(userId: string): Promise<string | null> {
   });
 }
 
-/**
- * Delete the WASM state for a user (e.g. on logout).
- */
-export async function deleteWasmState(userId: string): Promise<void> {
-  const db = await openDB();
-  const transaction = db.transaction([STATE_STORE], 'readwrite');
-  const store = transaction.objectStore(STATE_STORE);
-  store.delete(userId);
-
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-}
 
 /**
  * Cache plaintext of a sent message so it can be shown in history after reload.

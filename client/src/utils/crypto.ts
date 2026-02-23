@@ -100,9 +100,7 @@ export function base64urlEncode(bytes: Uint8Array): string {
     .replace(/=/g, '');
 }
 
-export function encodeBase64Url(bytes: Uint8Array): string {
-  return base64urlEncode(bytes)
-}
+export const encodeBase64Url = base64urlEncode;
 
 export function decodeBase64Url(base64url: string): Uint8Array {
   const base64 = base64url

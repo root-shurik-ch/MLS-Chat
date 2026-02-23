@@ -17,7 +17,7 @@ export interface DeliveryService {
     msgKind: MsgKind;
     mlsBytes: string;
     clientSeq: number;
-  }): Promise<void>;
+  }): Promise<number>;
 
   enqueueOffline(msg: OutgoingMessage): Promise<void>;
 

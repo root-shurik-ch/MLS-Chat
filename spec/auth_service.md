@@ -1,6 +1,6 @@
 # AuthService Protocol
 
-Authentication is passkey/WebAuthn-based. The client derives `user_id` from the MLS public key and never sends MLS private key in plaintext. Instead, it sends `mls_private_key_enc` encrypted using a key derived from the passkey (e.g. WebAuthn PRF).
+Authentication is passkey/WebAuthn-based. The client derives `user_id` from the MLS public key. The MLS **private** key is derived deterministically on-device from the passkey PRF output (HKDF-SHA-256) and is **never sent to the server** — not in registration, not in login, not ever. The server stores and returns only the MLS **public** key (`mls_public_key`), used for KeyPackage operations during group invites.
 
 See [spec/identity_and_passkeys.md](identity_and_passkeys.md) for details on user ID derivation, key encryption, and WebAuthn flows.
 
@@ -38,7 +38,6 @@ Request body:
   "user_id": "string",
   "device_id": "string",
   "mls_public_key": "base64",
-  "mls_private_key_enc": "base64",
   "webauthn_create_response": {}
 }
 ```
@@ -75,7 +74,6 @@ Response body:
 {
   "user_id": "string",
   "auth_token": "string",
-  "mls_private_key_enc": "base64",
   "mls_public_key": "base64",
   "profile": {
     "userId": "string",
@@ -114,8 +112,4 @@ The server validates WebAuthn responses according to the [WebAuthn Level 2 speci
 4. For registration, store the credential ID and public key.
 5. For login, match the credential ID with stored data.
 
-The client:
-
-Uses WebAuthn to obtain a secret (via PRF or similar) to decrypt mls_private_key_enc.
-
-Uses the decrypted MLS private key to initialize the MLS layer.
+The client uses the passkey PRF output (HKDF-SHA-256) to re-derive the MLS private key on-device. The login response's `mls_public_key` is used only for KeyPackage operations. No private key material ever leaves the device.
