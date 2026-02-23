@@ -60,10 +60,42 @@ WASM: load_group(group_id_hex) → MlsGroup::load(storage, group_id) → GROUPS 
 |---|---|
 | Group created (`create_group`) | `App.tsx` `handleSelectGroup` |
 | Group joined via invite (`process_welcome`) | `InviteJoinView.tsx` |
-| Invite generated (`add_member`) | `InviteLink.tsx` and `App.tsx` `processPendingInvites` |
+| Invite generated (`add_member`) | `InviteLink.tsx` and `App.tsx` `processPendingInvites` (only after successful `invite_complete`) |
+| Commit applied (`applyCommit`) | `Chat.tsx` `onDeliver` handler (real-time) |
 | Bulk history decrypted | `Chat.tsx` `loadHistory` effect |
 
 State is NOT saved after individual encrypt/decrypt in real-time chat (performance). The ratchet position after the last history load is the restore point.
+
+---
+
+## MLS Operation Serialization
+
+All WASM mutations share a single module-level promise-chain lock defined in `client/src/utils/mlsLock.ts`:
+
+```typescript
+let _lock: Promise<void> = Promise.resolve();
+
+export function runMlsOp<T>(fn: () => Promise<T>): Promise<T> {
+  const next = _lock.then(fn, fn) as Promise<T>;
+  _lock = next.then(() => {}, () => {});
+  return next;
+}
+```
+
+**Why module-level:** `Chat.tsx` and `App.tsx` are separate React component trees with no shared state. A `useRef`-based lock in `Chat.tsx` is invisible to `App.tsx`'s `processPendingInvites`. The module-level singleton is the only reliable serialization point.
+
+**What is wrapped:**
+
+| Operation | Location |
+|---|---|
+| `decryptMessage` | `Chat.tsx` `loadHistory` and `onDeliver` (with cache re-check inside lock) |
+| `applyCommit` | `Chat.tsx` `loadHistory` and `onDeliver` |
+| `encryptMessage` | `Chat.tsx` `handleSend` and `handleFileSelect` |
+| `loadGroup` + `importState` + `addMember` + `exportState` + `saveAndSyncWasmState` | `App.tsx` `processPendingInvites` (entire per-invite MLS block in one `runMlsOp` call) |
+
+**Why `encryptMessage` must be inside the lock:** MLS encrypt advances the sender's ratchet. If `encryptMessage` runs concurrently with an incoming `decryptMessage` (e.g. the user sends while an offline batch is being replayed), the WASM shared backend can be left in a corrupt state, producing `SecretReuseError` or `TooDistantInThePast` on subsequent decryptions.
+
+**Important:** In `processPendingInvites`, WASM state is saved only after `invite_complete` returns successfully. If `invite_complete` fails, the WASM epoch must not be persisted — doing so would leave the WASM at epoch N+1 with no server record of the Welcome, causing the next retry to attempt `addMember` on an already-consumed KeyPackage.
 
 ### Restore on startup
 
@@ -132,14 +164,20 @@ See `supabase/apply_schema.sql` for the authoritative schema.
 
 The invite flow is server-mediated — no manual hex copy-paste. E2E encryption is preserved: the server stores only public KP bytes and the encrypted Welcome.
 
-1. **Inviter** calls `invite_create` Edge Function → receives `invite_id`.
-2. Inviter constructs shareable URL: `https://app/?join=<invite_id>` and shares it (chat, email, etc.).
+1. **Any group member** calls `invite_create` Edge Function → receives `invite_id`.
+2. Constructs shareable URL: `https://app/?join=<invite_id>` and shares it (chat, email, etc.).
 3. **Joiner** opens the URL, logs in, and sees `InviteJoinView`.
-4. Joiner calls `mlsClient.generateKeyPackage()` → submits `kp_hex` via `invite_join` Edge Function.
-5. **Inviter's app** polls `invite_pending` every 5 s (via `InviteLink` component or `processPendingInvites` on login).
-6. When KP is found: `mlsClient.addMember(group, kp)` → Commit + Welcome; epoch advances.
-7. Inviter calls `invite_complete` with `welcome_hex`; calls `export_state()` and saves to IndexedDB.
-8. **Joiner** polls `invite_poll` every 3 s; when `welcome_hex` arrives → `processWelcome` → join complete.
+4. Joiner calls `mlsClient.generateKeyPackage()` → submits `kp_hex` via `invite_join` Edge Function. Server fires a push notification to all group members.
+5. **Any group member's app** polls `invite_pending` every 5 s (via `InviteLink` component) or every 30 s (via `processPendingInvites` background poll).
+6. When a KP is found: calls `invite_claim` — skips if another member holds the claim.
+7. If claimed: `mlsClient.addMember(group, kp)` → returns `{ welcome: string, commit: string }`; epoch advances to N+1 locally (WASM auto-applies via `merge_pending_commit`).
+8. Processor calls `invite_complete(invite_id, welcome_hex, commit_hex)`.
+   - Server stores `welcome_hex` and `commit_hex` on the invite record.
+   - Server inserts a `msg_kind: 'commit'` message into the group log via `send_message` RPC.
+   - Server broadcasts the commit via Supabase Realtime (best-effort).
+9. Processor calls `export_state()` and saves to IndexedDB (only on success).
+10. **Joiner** polls `invite_poll` every 3 s; when `welcome_hex` arrives → `processWelcome` → join complete (joiner is at epoch N+1 directly).
+11. **Other existing members** receive the `commit` message via DS and call `applyCommit` to advance from N → N+1.
 
 ### Joining via Welcome
 
@@ -151,8 +189,20 @@ The invite flow is server-mediated — no manual hex copy-paste. E2E encryption 
 
 ### Sending a Message
 
-1. `mlsClient.encryptMessage(group, plaintext)` → ciphertext hex (message secrets update in shared backend).
-2. `deliveryService.send({ groupId: appUuid, mlsBytes: ciphertext, ... })` → WebSocket.
+1. `runMlsOp(() => mlsClient.encryptMessage(group, plaintext))` → ciphertext hex inside the shared MLS lock (ratchet advances in shared backend; lock prevents concurrent decrypt from corrupting state).
+2. `deliveryService.send({ groupId: appUuid, mlsBytes: ciphertext, clientSeq, ... })` → WebSocket.
+
+**`clientSeq` persistence:** Each device persists the next `clientSeq` to `localStorage` keyed by `groupId` (`min:clientSeq:<groupId>`). This ensures that after a page reload the counter resumes from its last position, preventing collision between retry acks for queued offline messages and new messages starting at 1.
+
+### Receiving a Commit (`msg_kind: 'commit'`)
+
+When the DS delivers a message with `msg_kind === 'commit'` (either real-time or via history replay):
+
+1. `mlsClient.applyCommit(mlsGroup, { proposals: [], commit: msg.mlsBytes, epochAuthenticator: '' })` — advances the WASM group from epoch N to N+1.
+2. `export_state()` + `saveAndSyncWasmState()` — persists the new epoch to IndexedDB.
+3. The message is never added to the chat message list.
+
+Failed `applyCommit` calls (e.g. the joiner's own client receiving a commit it already processed via `processWelcome`) are silently swallowed. History replay applies commits in `server_seq` ASC order, ensuring all epoch advances precede any messages at the new epoch.
 
 ### Receiving a Message
 
@@ -160,10 +210,13 @@ The invite flow is server-mediated — no manual hex copy-paste. E2E encryption 
 
 ### Loading History
 
-1. `GET /functions/v1/get_messages` with `{ group_id, user_id, device_id }`.
-2. For each message: `mlsClient.decryptMessage(group, m.mls_bytes)`.
-3. Failed decryptions (e.g. messages from before this device joined) are silently skipped.
-4. After successful batch: `export_state()` + `saveWasmState()` to checkpoint the ratchet position.
+1. `POST /functions/v1/get_messages` with `{ group_id, user_id, device_id, since_seq?, limit? }`.
+   - On reconnect pass `since_seq: maxSeqRef.current` to fetch only messages missed during the outage.
+   - Default `limit` is 200; can be overridden by the caller (server caps at 1000).
+2. Commits (`msg_kind === 'commit'`) are applied first via `runMlsOp(() => mlsClient.applyCommit(...))` to advance epoch before decrypting application messages.
+3. For each chat message: check IndexedDB cache → if miss, `runMlsOp(async () => { getCachedMessage(); decryptMessage(); saveSentMessage(); })` (cache re-check inside lock prevents duplicate decryption when `onDeliver` races with `loadHistory`).
+4. Failed decryptions fall back to server-side message cache (`message_cache_sync`), then are silently skipped if unrecoverable.
+5. After successful batch: `export_state()` + `saveAndSyncWasmState()` to checkpoint the ratchet position.
 
 ---
 
@@ -177,3 +230,34 @@ Each Commit advances the MLS epoch:
 The epoch is stored in `groups.epoch` (metadata only) and fully in the WASM backend (the source of truth). After a page reload, the persisted epoch is restored via `import_state` + `load_group`.
 
 Messages encrypted in epoch N can only be decrypted by a client whose ratchet is at epoch N. Messages from epochs before the last persisted checkpoint cannot be re-decrypted — they should be cached decrypted in the client (future work: `mls_messages` IndexedDB store).
+
+---
+
+## MLS Invariants: add_member / process_welcome / applyCommit
+
+These invariants must be respected to maintain epoch consistency across all group members.
+
+### `add_member(group, kp)` — the processor
+
+- WASM `add_member` internally calls `merge_pending_commit` before returning. The **processor is already at epoch N+1** when `addMember` returns.
+- Returns `{ welcome: hex, commit: hex }`.
+- The processor must NOT call `applyCommit` on the commit it just created — it would double-advance the epoch.
+
+### `process_welcome(welcome_hex)` — the joiner
+
+- WASM `process_welcome` brings the joiner directly to **epoch N+1**.
+- The joiner must NOT call `applyCommit` on the same commit. The commit message in the DS is intended only for existing members who were at epoch N and did not participate in the add.
+
+### `applyCommit(commitHex)` — existing members (neither processor nor joiner)
+
+- Every other existing group member (group size > 2 case) must call `applyCommit` exactly once per Commit to advance from epoch N to N+1.
+- Calling `applyCommit` on a commit that has already been applied (e.g. the joiner receiving a commit for its own Welcome) produces an error; this is silently swallowed.
+- `applyCommit` must be called in `server_seq` order to avoid processing a message at epoch N+1 while still at epoch N.
+
+### Solo / 2-member groups
+
+When the processor is the only existing member before the add (a 2-person group being formed), there are no other members to receive the commit. `invite_complete` still stores the commit message in the DS log, but no existing member will consume it. This is safe — the joiner ignores it via `processWelcome`, and the processor already applied it via `addMember`.
+
+### Concurrency: one active invite per group
+
+Two simultaneous pending invites for the same group are not safe to process in parallel — each `addMember` call would produce conflicting commits. The `invite_claim` mechanism serialises processing (one claim holder at a time per invite), and the UI limits display to one active invite per group.

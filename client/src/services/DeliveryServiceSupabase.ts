@@ -16,6 +16,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
   private authToken: AuthToken | null = null;
   private deliverHandler: ((msg: IncomingMessage) => void) | null = null;
   private subscribed = false;
+  private isSubscribing = false;
   private subscriptionData: {
     userId: string;
     deviceId: string;
@@ -54,13 +55,16 @@ export class DeliveryServiceSupabase implements DeliveryService {
       this.emitStateChange(state);
 
       if (state === ConnectionState.CONNECTED) {
-        // Re-subscribe if we were subscribed before
-        if (this.subscribed && this.subscriptionData) {
+        // Re-subscribe if we had a previous subscription (subscriptionData is set on first subscribe)
+        if (this.subscriptionData) {
           console.log('Reconnected - resubscribing...');
           this.subscribe(this.subscriptionData).catch(err => {
             console.error('Failed to resubscribe:', err);
           });
         }
+      } else if (state === ConnectionState.DISCONNECTED || state === ConnectionState.RECONNECTING) {
+        // Mark as no longer subscribed so the next CONNECTED triggers resubscription
+        this.subscribed = false;
       } else if (state === ConnectionState.FAILED) {
         console.error('WebSocket connection failed:', error);
       }
@@ -71,6 +75,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
   }
 
   async subscribe(input: { userId: string; deviceId: string; groups: string[] }): Promise<void> {
+    if (this.isSubscribing || this.subscribed) return;
     if (!this.wsManager || !this.wsManager.isConnected()) {
       throw new Error("Not connected");
     }
@@ -78,44 +83,53 @@ export class DeliveryServiceSupabase implements DeliveryService {
       throw new Error("No auth token");
     }
 
+    this.isSubscribing = true;
     // Store subscription data for reconnection
     this.subscriptionData = input;
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Subscribe timeout"));
-      }, 5000);
+    try {
+      return await new Promise((resolve, reject) => {
+        let msgUnsub: (() => void) | undefined;
 
-      // Listen for subscribed response
-      const unsubscribe = this.wsManager!.onMessage((message: WebSocketMessage) => {
-        if (message.type === "subscribed") {
-          clearTimeout(timeout);
-          unsubscribe();
-          this.subscribed = true;
-          console.log('Subscribed successfully');
+        const timeout = setTimeout(() => {
+          // Clean up orphaned listener before rejecting
+          msgUnsub?.();
+          reject(new Error("Subscribe timeout"));
+        }, 5000);
 
-          // Sync offline messages after successful subscription
-          this.syncOffline().catch(err => {
-            console.error('Failed to sync offline messages:', err);
-          });
+        // Listen for subscribed response
+        msgUnsub = this.wsManager!.onMessage((message: WebSocketMessage) => {
+          if (message.type === "subscribed") {
+            clearTimeout(timeout);
+            msgUnsub!();
+            this.subscribed = true;
+            console.log('Subscribed successfully');
 
-          resolve();
-        } else if (message.type === "error" && message.context === "subscribe") {
-          clearTimeout(timeout);
-          unsubscribe();
-          reject(new Error(message.error || "Subscribe failed"));
-        }
+            // Sync offline messages after successful subscription
+            this.syncOffline().catch(err => {
+              console.error('Failed to sync offline messages:', err);
+            });
+
+            resolve();
+          } else if (message.type === "error" && message.context === "subscribe") {
+            clearTimeout(timeout);
+            msgUnsub!();
+            reject(new Error(message.error || "Subscribe failed"));
+          }
+        });
+
+        // Send subscribe request
+        this.wsManager!.send({
+          type: "subscribe",
+          user_id: input.userId,
+          device_id: input.deviceId,
+          groups: input.groups,
+          auth: this.authToken!.value,
+        });
       });
-
-      // Send subscribe request
-      this.wsManager!.send({
-        type: "subscribe",
-        user_id: input.userId,
-        device_id: input.deviceId,
-        groups: input.groups,
-        auth: this.authToken!.value,
-      });
-    });
+    } finally {
+      this.isSubscribing = false;
+    }
   }
 
   async send(msg: {
@@ -196,6 +210,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
     this.authToken = null;
     this.deliverHandler = null;
     this.subscribed = false;
+    this.isSubscribing = false;
     this.subscriptionData = null;
   }
 

@@ -55,7 +55,7 @@ Client → DS:
   "group_id": "string",
   "sender_id": "string",
   "device_id": "string",
-  "msg_kind": "handshake" | "chat" | "control",
+  "msg_kind": "handshake" | "chat" | "control" | "commit",
   "mls_bytes": "base64",
   "client_seq": 0
 }
@@ -73,7 +73,7 @@ DS → Client:
   "server_time": 0,
   "sender_id": "string",
   "device_id": "string",
-  "msg_kind": "handshake" | "chat" | "control",
+  "msg_kind": "handshake" | "chat" | "control" | "commit",
   "mls_bytes": "base64"
 }
 ```
@@ -81,6 +81,31 @@ DS → Client:
 `server_seq` is a monotonically increasing integer per `group_id`.
 
 `server_time` is a server timestamp (epoch milliseconds).
+
+## Message Kinds
+
+| `msg_kind` | Description |
+|---|---|
+| `chat` | An MLS application message containing encrypted plaintext. Decrypted and displayed by recipients. |
+| `handshake` | An MLS handshake message (Proposal or Commit sent directly via DS by a client). Processed before application messages per RFC 9750. |
+| `control` | Reserved for application-level control messages (e.g. group rename, typing indicators). Not yet used. |
+| `commit` | An MLS Commit distributing an epoch advance (e.g. from `add_member`) to existing group members. **Never displayed as a chat message.** Clients call `applyCommit` when receiving this kind and save the updated WASM state. |
+
+### `commit` message semantics
+
+A `commit` message is injected server-side by `invite_complete` (via the `send_message` Postgres RPC and a Supabase Realtime broadcast) when a new member is added to a group. It carries the raw hex Commit bytes returned by WASM `addMember`.
+
+**Who sends it:** The processor (the member who ran `addMember`) does NOT send the commit via the client WebSocket `send` message. Instead, `invite_complete` inserts it directly into the `messages` table using the `send_message` RPC so it is reliably stored even if the DS client is not connected.
+
+**Who consumes it:** Every existing group member *other than the processor* must apply this commit to advance from epoch N to N+1:
+- Connected members receive a Realtime `deliver` broadcast immediately.
+- Offline members receive it via `get_messages` history replay on reconnect.
+
+In both cases the client calls `mlsClient.applyCommit(mlsGroup, { proposals: [], commit: mls_bytes, epochAuthenticator: '' })` and saves the resulting WASM state. Failed `applyCommit` calls (e.g. when the joiner's client receives its own commit after already being at N+1 via `processWelcome`) are silently swallowed.
+
+**DS sender_id filter:** The DS WebSocket `onDeliver` handler in `Chat.tsx` skips messages where `senderId === userId && deviceId === deviceId` (own device). The processor's own device therefore does not double-apply: WASM `addMember` already calls `merge_pending_commit` internally, leaving the processor at N+1.
+
+---
 
 ## Message Ordering Guarantees
 
@@ -100,17 +125,29 @@ See RFC 9750 Section 12 for details on Commit validation.
 
 ## Message History & Offline Recovery
 
-Messages are stored with a TTL (e.g., 30 days). Offline clients can recover by calling `GET /messages`:
+Messages are stored with a TTL (e.g., 30 days). Offline clients recover by calling the `get_messages` Edge Function.
 
-Request: `GET /messages?group_id=...&after_server_seq=...&auth=...`
+**Request:** `POST /functions/v1/get_messages`
 
-Response:
+```json
+{
+  "group_id": "string",
+  "user_id": "string",
+  "device_id": "string",
+  "since_seq": 0,
+  "limit": 200
+}
+```
+
+- `since_seq` (optional, default 0): fetch only messages with `server_seq > since_seq`. On initial load omit or pass 0. On reconnect pass the highest `server_seq` seen so far to fetch only missed messages.
+- `limit` (optional, default 200, max 1000): maximum number of rows returned. Callers may pass a smaller value for performance; the server caps at 1000.
+
+**Response:**
 
 ```json
 {
   "messages": [
     {
-      "group_id": "string",
       "server_seq": 1,
       "server_time": 1234567890,
       "sender_id": "string",
@@ -122,7 +159,23 @@ Response:
 }
 ```
 
-Clients replay the history to catch up.
+Messages are returned in `server_seq` ASC order. Clients replay the history to catch up.
+
+## Subscribe — Idempotency & Reconnection
+
+`subscribe` is idempotent: a second call while a subscribe is already in flight or already complete is a no-op (returns immediately without sending a second WS frame).
+
+On reconnect the `DeliveryServiceSupabase` adapter resubscribes automatically via its internal `onStateChange → CONNECTED` handler. The `subscribed` flag is reset to `false` on `DISCONNECTED` and `RECONNECTING` state transitions so the auto-resubscribe fires correctly on the next `CONNECTED`.
+
+Client components (e.g. `Chat.tsx`) must guard their own subscribe call:
+
+```typescript
+if (deliveryService.isConnected()) {
+  await deliveryService.subscribe({ userId, deviceId, groups: [groupId] });
+}
+```
+
+This prevents a "Not connected" error when the component mounts while the WebSocket is still reconnecting. The adapter's auto-resubscribe handles that case instead.
 
 ## Out-of-Order Handling
 

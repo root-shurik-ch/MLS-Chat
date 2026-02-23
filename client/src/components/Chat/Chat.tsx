@@ -7,6 +7,7 @@ import InviteLink from '../Group/InviteLink';
 import GroupMembers from '../Group/GroupMembers';
 import { saveSentMessage, getSentMessage, getCachedMessage } from '../../utils/mlsGroupStorage';
 import { saveAndSyncWasmState } from '../../utils/wasmStateSync';
+import { runMlsOp } from '../../utils/mlsLock';
 import { KeyManager } from '../../utils/keyManager';
 import { encryptString, decryptString } from '../../utils/crypto';
 import { ArrowLeft, UserPlus, Users, Lock, Paperclip, Download } from 'lucide-react';
@@ -322,7 +323,9 @@ const Chat: React.FC<ChatProps> = ({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
-  const [clientSeq, setClientSeq] = useState(1);
+  const [clientSeq, setClientSeq] = useState(() =>
+    Number(localStorage.getItem(`min:clientSeq:${groupId}`) ?? '1')
+  );
   const [showInvite, setShowInvite] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [memberAvatars, setMemberAvatars] = useState<Map<string, string>>(new Map());
@@ -333,24 +336,10 @@ const Chat: React.FC<ChatProps> = ({
   const hasConnectedRef = useRef(false);
   // Highest server_seq seen — used to pass since_seq on reconnect loads.
   const maxSeqRef = useRef(0);
-  // Serializes all MLS decrypt/applyCommit calls to prevent SecretReuseError when
-  // onDeliver and loadHistory race to process the same message concurrently.
-  const mlsLock = useRef<Promise<void>>(Promise.resolve());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toast = useToastContext();
-
-  /**
-   * Run an MLS operation (decrypt / applyCommit) exclusively.
-   * Prevents SecretReuseError caused by concurrent onDeliver + loadHistory calls.
-   */
-  const runMlsOp = <T,>(fn: () => Promise<T>): Promise<T> => {
-    const run = () => fn();
-    const next = mlsLock.current.then(run, run) as Promise<T>;
-    mlsLock.current = next.then(() => {}, () => {}) as Promise<void>;
-    return next;
-  };
 
   // Re-fetch history when WebSocket reconnects so messages sent during outage appear.
   useEffect(() => {
@@ -611,7 +600,11 @@ const Chat: React.FC<ChatProps> = ({
 
     const setupDelivery = async () => {
       try {
-        await deliveryService.subscribe({ userId, deviceId, groups: [groupId] });
+        // Only subscribe if already connected — DeliveryServiceSupabase handles
+        // auto-resubscription on reconnect via its own onStateChange handler.
+        if (deliveryService.isConnected()) {
+          await deliveryService.subscribe({ userId, deviceId, groups: [groupId] });
+        }
 
         deliveryService.onDeliver(async (msg: IncomingMessage) => {
           if (!mounted) return;
@@ -687,7 +680,9 @@ const Chat: React.FC<ChatProps> = ({
 
     const text = input.trim();
     const currentSeq = clientSeq;
-    setClientSeq(prev => prev + 1);
+    const nextSeq = currentSeq + 1;
+    setClientSeq(nextSeq);
+    localStorage.setItem(`min:clientSeq:${groupId}`, String(nextSeq));
     setLoading(true);
 
     const pendingId = `pending_${Date.now()}`;
@@ -705,7 +700,7 @@ const Chat: React.FC<ChatProps> = ({
     setInput('');
 
     try {
-      const mlsBytes = await mlsClient.encryptMessage(mlsGroup, text);
+      const mlsBytes = await runMlsOp(() => mlsClient.encryptMessage(mlsGroup, text));
       const serverSeq = await deliveryService.send({
         groupId,
         senderId: userId,
@@ -836,8 +831,10 @@ const Chat: React.FC<ChatProps> = ({
 
       // 6. MLS-encrypt and send
       const currentSeq = clientSeq;
-      setClientSeq(prev => prev + 1);
-      const mlsBytes = await mlsClient.encryptMessage(mlsGroup, payloadStr);
+      const nextFileSeq = currentSeq + 1;
+      setClientSeq(nextFileSeq);
+      localStorage.setItem(`min:clientSeq:${groupId}`, String(nextFileSeq));
+      const mlsBytes = await runMlsOp(() => mlsClient.encryptMessage(mlsGroup, payloadStr));
       const serverSeq = await deliveryService.send({
         groupId,
         senderId: userId,

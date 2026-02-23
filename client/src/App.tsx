@@ -11,6 +11,7 @@ import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
 import { saveMlsGroup, loadAllMlsGroups, loadWasmState, saveWasmState, deleteMlsGroup } from './utils/mlsGroupStorage';
 import { saveAndSyncWasmState, downloadWasmStateFromServer } from './utils/wasmStateSync';
+import { runMlsOp } from './utils/mlsLock';
 import { IndexedDBStorage } from './utils/storage';
 import { registerPushNotifications, requestAndRegisterPush } from './utils/pushNotifications';
 import { Lock, LogOut, Bell, UserCircle } from 'lucide-react';
@@ -204,76 +205,78 @@ const App: React.FC = () => {
           const claimData = await claimRes.json() as { claimed?: boolean };
           if (!claimData.claimed) continue; // Another member holds the claim
 
-          const storedGroups = await loadAllMlsGroups();
-          const stored = storedGroups.find(g => g.id === invite.group_id);
-          if (!stored || !mlsClientRef.current) continue;
+          await runMlsOp(async () => {
+            const storedGroups = await loadAllMlsGroups();
+            const stored = storedGroups.find(g => g.id === invite.group_id);
+            if (!stored || !mlsClientRef.current) return;
 
-          let mlsGroup: MlsGroup | undefined;
-          try {
-            mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
-          } catch {
-            const stateJson = await loadWasmState(uid);
-            if (stateJson && mlsClientRef.current) {
-              await mlsClientRef.current.importState(stateJson);
+            let mlsGroup: MlsGroup | undefined;
+            try {
               mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
+            } catch {
+              const stateJson = await loadWasmState(uid);
+              if (stateJson && mlsClientRef.current) {
+                await mlsClientRef.current.importState(stateJson);
+                mlsGroup = await mlsClientRef.current.loadGroup(stored.groupId, stored.id);
+              }
             }
-          }
-          if (!mlsGroup || !mlsClientRef.current) continue;
+            if (!mlsGroup || !mlsClientRef.current) return;
 
-          // addMember via WASM
-          const kp = { data: invite.kp_hex, signature: '', hpkePublicKey: '', credential: '', extensions: {} as Record<string, unknown> };
-          let result;
-          try {
-            result = await mlsClientRef.current.addMember(mlsGroup, kp);
-          } catch (addErr) {
-            const msg = String(addErr);
-            if (msg.includes('DuplicateSignatureKey')) {
-              // User was already added to the MLS group (race with InviteLink 5s poll).
-              // The invite_complete likely already ran — just persist current WASM state and move on.
-              console.warn('[App] addMember skipped (already added):', invite.invite_id);
-              const stateJson = await mlsClientRef.current.exportState();
-              await saveAndSyncWasmState(uid, did, stateJson);
-            } else {
-              throw addErr; // re-throw unknown errors to outer catch
+            // addMember via WASM
+            const kp = { data: invite.kp_hex, signature: '', hpkePublicKey: '', credential: '', extensions: {} as Record<string, unknown> };
+            let result;
+            try {
+              result = await mlsClientRef.current.addMember(mlsGroup, kp);
+            } catch (addErr) {
+              const msg = String(addErr);
+              if (msg.includes('DuplicateSignatureKey')) {
+                // User was already added to the MLS group (race with InviteLink 5s poll).
+                // The invite_complete likely already ran — just persist current WASM state and move on.
+                console.warn('[App] addMember skipped (already added):', invite.invite_id);
+                const stateJson = await mlsClientRef.current.exportState();
+                await saveAndSyncWasmState(uid, did, stateJson);
+              } else {
+                throw addErr; // re-throw unknown errors to outer catch
+              }
+              return;
             }
-            continue;
-          }
-          if (!result.welcome) {
-            console.warn('[App] addMember returned no welcome for invite:', invite.invite_id);
-            continue;
-          }
+            if (!result.welcome) {
+              console.warn('[App] addMember returned no welcome for invite:', invite.invite_id);
+              return;
+            }
 
-          // Deliver welcome — check the response so we know whether to persist WASM state.
-          // If invite_complete fails we must NOT save the advanced epoch: the next retry would
-          // try addMember on a KP that the WASM already consumed, causing a panic.
-          const completeRes = await fetch(`${supabaseUrl}/functions/v1/invite_complete`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              invite_id: invite.invite_id,
-              user_id: uid,
-              device_id: did,
-              welcome_hex: result.welcome,
-              commit_hex: result.commit ?? null,
-            }),
+            // Deliver welcome — check the response so we know whether to persist WASM state.
+            // If invite_complete fails we must NOT save the advanced epoch: the next retry would
+            // try addMember on a KP that the WASM already consumed, causing a panic.
+            const completeRes = await fetch(`${supabaseUrl}/functions/v1/invite_complete`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                invite_id: invite.invite_id,
+                user_id: uid,
+                device_id: did,
+                welcome_hex: result.welcome,
+                commit_hex: result.commit ?? null,
+              }),
+            });
+
+            if (!completeRes.ok) {
+              const errData = await completeRes.json().catch(() => ({})) as { error?: string };
+              if (completeRes.status === 409) {
+                // Already completed by a previous call — safe to continue
+                console.log('[App] Invite already complete (409):', invite.invite_id);
+              } else {
+                console.error('[App] invite_complete failed:', completeRes.status, errData.error, 'invite:', invite.invite_id);
+                return; // Skip WASM state save — epoch must not be persisted on failure
+              }
+            }
+
+            // Persist updated WASM state only after successful delivery
+            const stateJson = await mlsClientRef.current.exportState();
+            await saveAndSyncWasmState(uid, did, stateJson);
+
+            console.log('[App] Processed pending invite:', invite.invite_id);
           });
-
-          if (!completeRes.ok) {
-            const errData = await completeRes.json().catch(() => ({})) as { error?: string };
-            if (completeRes.status === 409) {
-              // Already completed by a previous call — safe to continue
-              console.log('[App] Invite already complete (409):', invite.invite_id);
-            } else {
-              console.error('[App] invite_complete failed:', completeRes.status, errData.error, 'invite:', invite.invite_id);
-              continue; // Skip WASM state save — epoch must not be persisted on failure
-            }
-          }
-
-          // Persist updated WASM state only after successful delivery
-          const stateJson = await mlsClientRef.current.exportState();
-          await saveAndSyncWasmState(uid, did, stateJson);
-
-          console.log('[App] Processed pending invite:', invite.invite_id);
         } catch (e) {
           console.warn('[App] Failed to process invite:', invite.invite_id, e);
         }
