@@ -61,7 +61,7 @@ WASM: load_group(group_id_hex) → MlsGroup::load(storage, group_id) → GROUPS 
 | Group created (`create_group`) | `App.tsx` `handleSelectGroup` |
 | Group joined via invite (`process_welcome`) | `InviteJoinView.tsx` |
 | Invite generated (`add_member`) | `InviteLink.tsx` and `App.tsx` `processPendingInvites` (only after successful `invite_complete`) |
-| Commit applied (`applyCommit`) | `Chat.tsx` `onDeliver` handler (real-time) |
+| Commit applied (`applyCommit`) | `Chat.tsx` `onDeliver` handler (real-time, debounced 800 ms; flushed on unmount) |
 | Bulk history decrypted | `Chat.tsx` `loadHistory` effect |
 
 State is NOT saved after individual encrypt/decrypt in real-time chat (performance). The ratchet position after the last history load is the restore point.
@@ -199,8 +199,9 @@ The invite flow is server-mediated — no manual hex copy-paste. E2E encryption 
 When the DS delivers a message with `msg_kind === 'commit'` (either real-time or via history replay):
 
 1. `mlsClient.applyCommit(mlsGroup, { proposals: [], commit: msg.mlsBytes, epochAuthenticator: '' })` — advances the WASM group from epoch N to N+1.
-2. `export_state()` + `saveAndSyncWasmState()` — persists the new epoch to IndexedDB.
-3. The message is never added to the chat message list.
+2. `export_state()` — captures the new WASM state.
+3. `scheduleSave(stateJson)` — debounced 800 ms: if additional commits arrive within the window, the timer resets and only the latest state is written. A burst of N commits (e.g. 3 simultaneous member additions) produces 1 IndexedDB write + 1 `sync_state` POST instead of N. On `useEffect` cleanup, `flushPendingSave()` fires immediately so no state is lost on unmount.
+4. The message is never added to the chat message list.
 
 Failed `applyCommit` calls (e.g. the joiner's own client receiving a commit it already processed via `processWelcome`) are silently swallowed. History replay applies commits in `server_seq` ASC order, ensuring all epoch advances precede any messages at the new epoch.
 

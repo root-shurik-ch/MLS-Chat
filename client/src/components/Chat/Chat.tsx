@@ -598,6 +598,31 @@ const Chat: React.FC<ChatProps> = ({
   useEffect(() => {
     let mounted = true;
 
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingStateJson: string | null = null;
+
+    const scheduleSave = (stateJson: string) => {
+      pendingStateJson = stateJson;
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        saveTimer = null;
+        const json = pendingStateJson;
+        pendingStateJson = null;
+        if (json) saveAndSyncWasmState(userId, deviceId, json).catch(e =>
+          console.warn('[Chat] Failed to save WASM state (debounced):', e)
+        );
+      }, 800);
+    };
+
+    const flushPendingSave = () => {
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      if (pendingStateJson) {
+        const json = pendingStateJson;
+        pendingStateJson = null;
+        saveAndSyncWasmState(userId, deviceId, json).catch(() => {});
+      }
+    };
+
     const setupDelivery = async () => {
       try {
         // Only subscribe if already connected — DeliveryServiceSupabase handles
@@ -614,9 +639,7 @@ const Chat: React.FC<ChatProps> = ({
             try {
               await runMlsOp(() => mlsClient.applyCommit(mlsGroup, { proposals: [], commit: msg.mlsBytes, epochAuthenticator: '' }));
               const stateJson = await mlsClient.exportState();
-              saveAndSyncWasmState(userId, deviceId, stateJson).catch(e =>
-                console.warn('[Chat] Failed to save WASM state after applyCommit:', e)
-              );
+              scheduleSave(stateJson);
             } catch (e) {
               console.warn('[Chat] applyCommit (likely already at new epoch):', e);
             }
@@ -668,7 +691,7 @@ const Chat: React.FC<ChatProps> = ({
     };
 
     setupDelivery();
-    return () => { mounted = false; };
+    return () => { mounted = false; flushPendingSave(); };
   }, [groupId, userId, deviceId, mlsGroup, mlsClient, deliveryService]);
 
   useEffect(() => {
