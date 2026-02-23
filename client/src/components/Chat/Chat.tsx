@@ -330,10 +330,26 @@ const Chat: React.FC<ChatProps> = ({
   // Incremented on WebSocket reconnect to trigger a history re-fetch for missed messages.
   const [reconnectCount, setReconnectCount] = useState(0);
   const hasConnectedRef = useRef(false);
+  // Highest server_seq seen — used to pass since_seq on reconnect loads.
+  const maxSeqRef = useRef(0);
+  // Serializes all MLS decrypt/applyCommit calls to prevent SecretReuseError when
+  // onDeliver and loadHistory race to process the same message concurrently.
+  const mlsLock = useRef<Promise<void>>(Promise.resolve());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toast = useToastContext();
+
+  /**
+   * Run an MLS operation (decrypt / applyCommit) exclusively.
+   * Prevents SecretReuseError caused by concurrent onDeliver + loadHistory calls.
+   */
+  const runMlsOp = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = () => fn();
+    const next = mlsLock.current.then(run, run) as Promise<T>;
+    mlsLock.current = next.then(() => {}, () => {}) as Promise<void>;
+    return next;
+  };
 
   // Re-fetch history when WebSocket reconnects so messages sent during outage appear.
   useEffect(() => {
@@ -416,7 +432,13 @@ const Chat: React.FC<ChatProps> = ({
         const res = await fetch(`${SUPABASE_URL}/functions/v1/get_messages`, {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ group_id: groupId, user_id: userId, device_id: deviceId }),
+          body: JSON.stringify({
+            group_id: groupId,
+            user_id: userId,
+            device_id: deviceId,
+            // On reconnect, only fetch messages we haven't seen yet.
+            ...(reconnectCount > 0 && maxSeqRef.current > 0 ? { since_seq: maxSeqRef.current } : {}),
+          }),
         });
         if (!res.ok) return;
         const { messages: list } = (await res.json()) as { messages?: Array<{
@@ -445,7 +467,7 @@ const Chat: React.FC<ChatProps> = ({
         for (const m of list) {
           if (m.msg_kind === 'commit') {
             try {
-              await mlsClient.applyCommit(mlsGroup, { proposals: [], commit: m.mls_bytes, epochAuthenticator: '' });
+              await runMlsOp(() => mlsClient.applyCommit(mlsGroup, { proposals: [], commit: m.mls_bytes, epochAuthenticator: '' }));
             } catch { /* already applied */ }
             continue;
           }
@@ -457,6 +479,7 @@ const Chat: React.FC<ChatProps> = ({
           // 1. Local IndexedDB cache hit
           const cachedMsg = await getCachedMessage(groupId, m.server_seq).catch(() => null);
           if (cachedMsg) {
+            if (m.server_seq > maxSeqRef.current) maxSeqRef.current = m.server_seq;
             parsed.push({
               id: `msg_${m.server_seq}`,
               senderId: cachedMsg.senderId,
@@ -469,14 +492,15 @@ const Chat: React.FC<ChatProps> = ({
             continue;
           }
 
-          // 2. Try MLS decryption
+          // 2. Try MLS decryption (serialized to avoid SecretReuseError)
           try {
-            const plaintext = await mlsClient.decryptMessage(mlsGroup, m.mls_bytes);
+            const plaintext = await runMlsOp(() => mlsClient.decryptMessage(mlsGroup, m.mls_bytes));
             await saveSentMessage(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, ts)
               .catch(() => {});
             // Upload encrypted copy to server cache (fire-and-forget)
             uploadMessageToCache(groupId, m.server_seq, plaintext, m.sender_id, m.device_id, userId, ts)
               .catch(() => {});
+            if (m.server_seq > maxSeqRef.current) maxSeqRef.current = m.server_seq;
             parsed.push({
               id: `msg_${m.server_seq}`,
               senderId: m.sender_id,
@@ -497,6 +521,7 @@ const Chat: React.FC<ChatProps> = ({
                 uploadMessageToCache(groupId, m.server_seq, text, m.sender_id, m.device_id, userId, ts)
                   .catch(() => {});
               }
+              if (m.server_seq > maxSeqRef.current) maxSeqRef.current = m.server_seq;
               parsed.push({
                 id: `msg_${m.server_seq}`,
                 senderId: m.sender_id,
@@ -519,6 +544,7 @@ const Chat: React.FC<ChatProps> = ({
               groupId, m.server_seq, serverMsg.text,
               serverMsg.senderId, serverMsg.deviceId, serverMsg.timestamp,
             ).catch(() => {});
+            if (m.server_seq > maxSeqRef.current) maxSeqRef.current = m.server_seq;
             parsed.push({
               id: `msg_${m.server_seq}`,
               senderId: serverMsg.senderId,
@@ -579,7 +605,7 @@ const Chat: React.FC<ChatProps> = ({
 
           if (msg.msgKind === 'commit') {
             try {
-              await mlsClient.applyCommit(mlsGroup, { proposals: [], commit: msg.mlsBytes, epochAuthenticator: '' });
+              await runMlsOp(() => mlsClient.applyCommit(mlsGroup, { proposals: [], commit: msg.mlsBytes, epochAuthenticator: '' }));
               const stateJson = await mlsClient.exportState();
               saveAndSyncWasmState(userId, deviceId, stateJson).catch(e =>
                 console.warn('[Chat] Failed to save WASM state after applyCommit:', e)
@@ -591,13 +617,14 @@ const Chat: React.FC<ChatProps> = ({
           }
 
           try {
-            const plaintext = await mlsClient.decryptMessage(mlsGroup, msg.mlsBytes);
+            const plaintext = await runMlsOp(() => mlsClient.decryptMessage(mlsGroup, msg.mlsBytes));
             saveSentMessage(groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, msg.serverTime)
               .catch(() => {});
             // Upload encrypted copy to server cache (fire-and-forget)
             uploadMessageToCache(
               groupId, msg.serverSeq, plaintext, msg.senderId, msg.deviceId, userId, msg.serverTime
             ).catch(() => {});
+            if (msg.serverSeq > maxSeqRef.current) maxSeqRef.current = msg.serverSeq;
             const newMessage: Message = {
               id: `msg_${msg.serverSeq}`,
               senderId: msg.senderId,

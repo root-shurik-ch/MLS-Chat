@@ -14,7 +14,7 @@ serve(async (req: Request) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders(req) });
   }
 
-  let body: { group_id?: string; user_id?: string; device_id?: string };
+  let body: { group_id?: string; user_id?: string; device_id?: string; since_seq?: number };
   try {
     body = await req.json();
   } catch {
@@ -27,6 +27,7 @@ serve(async (req: Request) => {
   const groupId = typeof body.group_id === "string" ? body.group_id.trim() : "";
   const userId = typeof body.user_id === "string" ? body.user_id.trim() : "";
   const deviceId = typeof body.device_id === "string" ? body.device_id.trim() : "";
+  const sinceSeq = typeof body.since_seq === "number" ? body.since_seq : 0;
 
   if (!groupId || !userId || !deviceId) {
     return new Response(
@@ -60,11 +61,13 @@ serve(async (req: Request) => {
     );
   }
 
-  const { data: rows, error } = await supabase
+  let msgsQuery = supabase
     .from("messages")
     .select("server_seq, server_time, sender_id, device_id, msg_kind, mls_bytes")
     .eq("group_id", groupId)
     .order("server_seq", { ascending: true });
+  if (sinceSeq > 0) msgsQuery = msgsQuery.gt("server_seq", sinceSeq);
+  const { data: rows, error } = await msgsQuery;
 
   if (error) {
     console.error("[get_messages] select error:", error);
