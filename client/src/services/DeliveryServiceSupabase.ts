@@ -22,6 +22,11 @@ export class DeliveryServiceSupabase implements DeliveryService {
     deviceId: string;
     groups: string[];
   } | null = null;
+  private pendingSubscription: {
+    userId: string;
+    deviceId: string;
+    groups: string[];
+  } | null = null;
 
   // Message acknowledgment tracking
   private pendingAcks = new Map<number, PendingAck>();
@@ -78,8 +83,14 @@ export class DeliveryServiceSupabase implements DeliveryService {
     const alreadySameGroups = this.subscribed &&
       this.subscriptionData?.groups?.length === input.groups.length &&
       input.groups.every(g => this.subscriptionData!.groups.includes(g));
-    if (this.isSubscribing || alreadySameGroups) return;
-    this.subscribed = false;
+    if (alreadySameGroups) return;
+    if (this.isSubscribing) {
+      // Record intent; will be executed in the finally block of the in-flight subscribe
+      this.pendingSubscription = input;
+      return;
+    }
+
+    // Validate before mutating any state
     if (!this.wsManager || !this.wsManager.isConnected()) {
       throw new Error("Not connected");
     }
@@ -87,6 +98,7 @@ export class DeliveryServiceSupabase implements DeliveryService {
       throw new Error("No auth token");
     }
 
+    this.subscribed = false;
     this.isSubscribing = true;
     // Store subscription data for reconnection
     this.subscriptionData = input;
@@ -133,6 +145,13 @@ export class DeliveryServiceSupabase implements DeliveryService {
       });
     } finally {
       this.isSubscribing = false;
+      if (this.pendingSubscription) {
+        const pending = this.pendingSubscription;
+        this.pendingSubscription = null;
+        this.subscribe(pending).catch(err =>
+          console.error('[DS] Pending resubscribe failed:', err)
+        );
+      }
     }
   }
 

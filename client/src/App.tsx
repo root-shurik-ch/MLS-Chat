@@ -60,6 +60,7 @@ const App: React.FC = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  const [isSelectingGroup, setIsSelectingGroup] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(() => {
     try {
@@ -307,6 +308,7 @@ const App: React.FC = () => {
   };
 
   const handleSelectGroup = async (groupId: string) => {
+    setIsSelectingGroup(true);
     try {
       let mlsGroup = mlsGroups.get(groupId);
 
@@ -378,6 +380,8 @@ const App: React.FC = () => {
       } else {
         toast.error(`Failed to open group. ${message}`);
       }
+    } finally {
+      setIsSelectingGroup(false);
     }
   };
 
@@ -650,16 +654,23 @@ const App: React.FC = () => {
       <ConnectionStatus deliveryService={deliveryServiceRef.current} />
       <Sidebar />
       <main className="flex-1 h-full overflow-hidden">
-        <Chat
-          key={currentGroupId!}
-          userId={userId!}
-          deviceId={deviceId!}
-          groupId={currentGroupId!}
-          mlsGroup={currentMlsGroup}
-          mlsClient={mlsClientRef.current}
-          deliveryService={deliveryServiceRef.current}
-          onBack={handleBackToGroups}
-        />
+        {isSelectingGroup ? (
+          <div className="h-full flex items-center justify-center">
+            <p className="font-mono text-[11px] text-white/20 uppercase tracking-widest animate-pulse">Opening…</p>
+          </div>
+        ) : (
+          <div key={currentGroupId!} className="h-full animate-fade-in">
+            <Chat
+              userId={userId!}
+              deviceId={deviceId!}
+              groupId={currentGroupId!}
+              mlsGroup={currentMlsGroup}
+              mlsClient={mlsClientRef.current}
+              deliveryService={deliveryServiceRef.current}
+              onBack={handleBackToGroups}
+            />
+          </div>
+        )}
       </main>
       {ProfileModalOverlay}
     </div>
