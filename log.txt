@@ -1,0 +1,53 @@
+commit 3aa0e15fc358fdded546f185374f4d04b271d0a7
+Author: shurikch <root@shurik.ch>
+Date:   Mon Feb 23 21:47:26 2026 +0100
+
+    docs: add message flow audit report
+
+commit 0c44db3d91bb6921df1ebd745c5364320cdfdad4
+Author: minimum.chat dev <dev@minimum.chat>
+Date:   Mon Feb 23 21:26:43 2026 +0100
+
+    fix(mls): shared lock, subscribe guard, clientSeq persistence, get_messages limit
+    
+    Priority 1 — Critical:
+    - Extract runMlsOp to module-level singleton (mlsLock.ts) so App.tsx
+      processPendingInvites and Chat.tsx share the same serialization lock
+    - Wrap encryptMessage in runMlsOp (handleSend + handleFileSelect) to
+      prevent concurrent encrypt/decrypt from corrupting WASM ratchet state
+    - Wrap entire per-invite MLS block (loadGroup+addMember+exportState) in
+      processPendingInvites inside a single runMlsOp call
+    
+    Priority 2 — High:
+    - DeliveryServiceSupabase: add isSubscribing guard (prevents double-subscribe
+      race on reconnect), fix timeout orphan (call msgUnsub before reject),
+      reset subscribed=false on DISCONNECTED/RECONNECTING
+    - Chat.tsx setupDelivery: guard subscribe call with isConnected() check to
+      avoid "Not connected" error while WS is reconnecting
+    
+    Priority 3 — Medium:
+    - Persist clientSeq to localStorage keyed by groupId to prevent ack
+      collision after page reload (min:clientSeq:<groupId>)
+    - get_messages: accept optional limit param (default 200, max 1000)
+    
+    Docs: update delivery_service.md and mls_integration.md to reflect all changes
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+commit 5cbaaec7a0cfbf7753fc11fe60cf7f3e50597acd
+Author: minimum.chat dev <dev@minimum.chat>
+Date:   Mon Feb 23 21:03:27 2026 +0100
+
+    fix(chat): detect initial connected state on mount for reconnect tracking
+    
+    hasConnectedRef started as false. When Chat mounts after App.tsx already
+    established the WebSocket connection, the initial CONNECTED event is missed.
+    On the first real reconnect the handler saw hasConnectedRef=false and treated
+    it as 'initial connect', skipping the loadHistory re-run that would fetch
+    messages sent during the outage.
+    
+    Fix: check deliveryService.getConnectionState() on mount and pre-set
+    hasConnectedRef=true if already connected, so the very first reconnect
+    correctly triggers setReconnectCount and the subsequent history re-fetch.
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>

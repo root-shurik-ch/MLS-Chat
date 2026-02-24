@@ -63,7 +63,8 @@ serve(async (req: Request) => {
     );
   }
 
-  const groups = (rows ?? []).map((g) => ({
+  // Filter out deleted groups (groups with no members left)
+  const groups = (rows ?? []).filter((g: any) => g.group_members.length > 0).map((g) => ({
     group_id: g.group_id,
     name: g.name,
     avatar_url: g.avatar_url ?? null,

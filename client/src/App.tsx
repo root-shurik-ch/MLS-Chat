@@ -6,6 +6,7 @@ import Chat from './components/Chat/Chat';
 import ConnectionStatus from './components/ConnectionStatus';
 import InviteJoinView from './components/Group/InviteJoinView';
 import ProfileModal from './components/Profile/ProfileModal';
+import LandingPage from './components/LandingPage';
 import { MlsClient, MlsGroup } from './mls/index';
 import { DeliveryServiceSupabase } from './services/DeliveryServiceSupabase';
 import { useToastContext } from './contexts/ToastContext';
@@ -18,7 +19,7 @@ import { Lock, LogOut, Bell, UserCircle } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import type { GroupMeta } from './domain/Group';
 
-type AppView = 'auth' | 'groups' | 'chat' | 'join';
+type AppView = 'landing' | 'auth' | 'groups' | 'chat' | 'join';
 
 async function fetchUserGroupsFromServer(userId: string, deviceId: string): Promise<GroupMeta[]> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -55,7 +56,7 @@ const App: React.FC = () => {
     new URLSearchParams(window.location.search).get('join')
   );
 
-  const [view, setView] = useState<AppView>('auth');
+  const [view, setView] = useState<AppView>(pendingInviteId ? 'auth' : 'landing');
   const [userId, setUserId] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
@@ -97,9 +98,9 @@ const App: React.FC = () => {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const wsUrl = import.meta.env.VITE_WS_URL || (supabaseUrl
         ? (() => {
-            const u = new URL(supabaseUrl);
-            return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send';
-          })()
+          const u = new URL(supabaseUrl);
+          return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/functions/v1/ds_send';
+        })()
         : 'ws://localhost:54321/functions/v1/ds_send');
       const authToken = {
         value: localStorage.getItem('authToken') || `temp_token_${userId}`,
@@ -341,7 +342,7 @@ const App: React.FC = () => {
           // Mark as unavailable; the user must request a re-invite.
           stateWasLost = true;
           console.warn('WASM state unrecoverable for group, marking unavailable:', groupId);
-          await deleteMlsGroup(storedGroup.id).catch(() => {});
+          await deleteMlsGroup(storedGroup.id).catch(() => { });
           setStateLostGroups(prev => new Set([...prev, groupId]));
           toast.warning('Encryption keys unavailable. Request a re-invite to restore access.');
         }
@@ -407,8 +408,12 @@ const App: React.FC = () => {
     setUserId(null);
     setDeviceId(null);
     setCurrentGroupId(null);
-    setView('auth');
+    setView('landing');
   };
+
+  if (view === 'landing') {
+    return <LandingPage onGetStarted={() => setView('auth')} />;
+  }
 
   // Auth view — full screen centered Key Ceremony
   if (view === 'auth') {

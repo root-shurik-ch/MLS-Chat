@@ -60,6 +60,22 @@ serve(async (req: Request) => {
     );
   }
 
+  // Verify user is the group creator
+  const { data: creator, error: creatorError } = await supabase
+    .from("groups")
+    .select("group_id")
+    .eq("group_id", groupId)
+    .eq("group_members.user_id", userId)
+    .eq("group_members.role", "creator")
+    .single();
+
+  if (creatorError || !creator) {
+    return new Response(
+      JSON.stringify({ error: "Only the group creator can delete the group" }),
+      { status: 403, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
+    );
+  }
+
   // Delete the group — CASCADE handles group_members, group_seq, and messages
   const { error: deleteError } = await supabase
     .from("groups")
@@ -73,6 +89,10 @@ serve(async (req: Request) => {
       { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } },
     );
   }
+
+  // Auto-leave notification for all members (except creator who already left)
+  // This is just for logging/monitoring - actual leave happens via CASCADE
+  console.log(`[group_delete] Group ${groupId} deleted by creator ${userId}. All members auto-removed via CASCADE.`);
 
   return new Response(
     JSON.stringify({ success: true }),
