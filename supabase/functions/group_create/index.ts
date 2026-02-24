@@ -76,6 +76,7 @@ serve(async (req: Request) => {
     name: groupName,
     avatar_url: typeof avatar_url === "string" && avatar_url.trim() ? avatar_url.trim() : null,
     ds_url: dsUrl,
+    creator_id: userId,
   });
 
   if (groupInsertError) {
