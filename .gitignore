@@ -57,6 +57,18 @@ yarn-error.log*
 tmp/
 temp/
 
+# Debug/shell output files (do not commit)
+err.txt
+out.txt
+log.txt
+add_err.txt
+ignore.txt
+repo_root.txt
+*_audit.txt
+*_post_add.txt
+client/err.txt
+client/out.txt
+
 # Supabase
 backend/.supabase/
 
