@@ -65,8 +65,7 @@ serve(async (req: Request) => {
     .from("groups")
     .select("group_id")
     .eq("group_id", groupId)
-    .eq("group_members.user_id", userId)
-    .eq("group_members.role", "creator")
+    .eq("creator_id", userId)
     .single();
 
   if (creatorError || !creator) {
